@@ -86,3 +86,219 @@ export const compact = (plan: Plan): string => {
     ...groups.filter(group => group.length > 0).map(group => group.map(word).join(' ')),
   ].join(' · ')
 }
+
+// ---------------------------------------------------------------- transitions
+
+/** A refusal the model can act on: its message is shown to the model as is. */
+export class PlanError extends Error {}
+
+export type StartInput = {
+  goal: string
+  finish?: string
+  steps: { text: string; weight?: number }[]
+}
+
+export type UpdateInput = {
+  done?: string[]
+  active?: string
+  add?: { text: string; weight?: number; after?: string }[]
+  drop?: string[]
+  finish?: string
+}
+
+const MAX_STEPS = 30
+
+const weightOf = (weight: number | undefined): 1 | 2 | 3 => {
+  if (weight === undefined) {
+    return 1
+  }
+
+  if (weight !== 1 && weight !== 2 && weight !== 3) {
+    throw new PlanError(`Вес шага - 1, 2 или 3, а пришло ${String(weight)}.`)
+  }
+
+  return weight
+}
+
+const textOf = (text: unknown): string => {
+  const clean = typeof text === 'string' ? cleanText(text) : ''
+
+  if (clean === '') {
+    throw new PlanError('У шага пустой текст.')
+  }
+
+  return clean
+}
+
+const allLiveDone = (plan: Plan): boolean => {
+  const steps = live(plan)
+
+  return steps.length > 0 && steps.every(step => step.status === 'done')
+}
+
+export const closePlan = (
+  plan: Plan,
+  outcome: 'done' | 'abandoned',
+  now: string,
+): { plan: Plan; dropped: string[] } => {
+  const dropped: string[] = []
+  const steps =
+    outcome === 'abandoned'
+      ? plan.steps
+      : plan.steps.map((step): Step => {
+          if (step.status === 'active') {
+            return { ...step, status: 'done' }
+          }
+
+          if (step.status === 'pending') {
+            dropped.push(step.text)
+
+            return { ...step, status: 'dropped' }
+          }
+
+          return step
+        })
+  const { lastChange: _lastChange, ...rest } = plan
+
+  return { plan: { ...rest, steps, status: outcome, closedAt: now, updatedAt: now }, dropped }
+}
+
+export const startPlan = (
+  record: SessionRecord,
+  input: StartInput,
+  now: string,
+): { record: SessionRecord; closed?: { goal: string; status: 'done' | 'abandoned' } } => {
+  const goal = typeof input.goal === 'string' ? cleanText(input.goal) : ''
+
+  if (goal === '') {
+    throw new PlanError('У плана пустая цель (goal).')
+  }
+
+  if (!Array.isArray(input.steps) || input.steps.length < 1 || input.steps.length > MAX_STEPS) {
+    throw new PlanError(`В плане должно быть от 1 до ${MAX_STEPS} шагов (steps).`)
+  }
+
+  const steps = input.steps.map(
+    (step, index): Step => ({
+      id: String(index + 1),
+      text: textOf(step?.text),
+      weight: weightOf(step?.weight),
+      status: index === 0 ? 'active' : 'pending',
+    }),
+  )
+  const finish = typeof input.finish === 'string' ? cleanText(input.finish) : ''
+  let closed: { goal: string; status: 'done' | 'abandoned' } | undefined
+  const plans = record.plans.map(plan => {
+    if (plan.status !== 'active') {
+      return plan
+    }
+
+    const status = allLiveDone(plan) ? 'done' : 'abandoned'
+    closed = { goal: plan.goal, status }
+
+    return closePlan(plan, status, now).plan
+  })
+  const created: Plan = {
+    id: 'p' + (record.plans.length + 1),
+    goal,
+    ...(finish === '' ? {} : { finish }),
+    steps,
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  return { record: { ...record, plans: [...plans, created] }, ...(closed ? { closed } : {}) }
+}
+
+export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan => {
+  let steps = plan.steps.map(step => ({ ...step }))
+  const find = (ref: string): Step => {
+    const wanted = String(ref).trim()
+    const found =
+      steps.find(step => step.id === wanted) ??
+      steps.find(step => step.status !== 'dropped' && step.text === cleanText(wanted))
+
+    if (!found) {
+      const ids = steps.filter(step => step.status !== 'dropped').map(step => step.id)
+
+      throw new PlanError(`В плане нет шага ${wanted}. Есть шаги: ${ids.join(', ')}.`)
+    }
+
+    return found
+  }
+  const before = percent(plan)
+  const added = input.add ?? []
+
+  for (const one of added) {
+    const created: Step = {
+      id: String(Math.max(0, ...steps.map(step => Number(step.id))) + 1),
+      text: textOf(one?.text),
+      weight: weightOf(one?.weight),
+      status: 'pending',
+    }
+
+    if (one.after === undefined) {
+      steps.push(created)
+    } else {
+      const at = steps.indexOf(find(one.after))
+      steps = [...steps.slice(0, at + 1), created, ...steps.slice(at + 1)]
+    }
+  }
+
+  if (live({ ...plan, steps }).length > MAX_STEPS) {
+    throw new PlanError(`В плане не может быть больше ${MAX_STEPS} шагов.`)
+  }
+
+  const dropIds = (input.drop ?? []).map(ref => find(ref).id)
+  const doneIds = (input.done ?? []).map(ref => find(ref).id)
+  const clash = doneIds.find(id => dropIds.includes(id))
+
+  if (clash !== undefined) {
+    throw new PlanError(`Шаг ${clash} указан и в done, и в drop. Выбери одно.`)
+  }
+
+  for (const step of steps) {
+    if (dropIds.includes(step.id)) {
+      step.status = 'dropped'
+    } else if (doneIds.includes(step.id)) {
+      step.status = 'done'
+    }
+  }
+
+  if (input.active !== undefined) {
+    const target = find(input.active)
+
+    if (target.status === 'done' || target.status === 'dropped') {
+      throw new PlanError(`Шаг ${target.id} уже закрыт, активным его сделать нельзя.`)
+    }
+
+    for (const step of steps) {
+      if (step.status === 'active') {
+        step.status = 'pending'
+      }
+    }
+
+    target.status = 'active'
+  } else if (!steps.some(step => step.status === 'active')) {
+    const next = steps.find(step => step.status === 'pending')
+
+    if (next) {
+      next.status = 'active'
+    }
+  }
+
+  const { lastChange: _lastChange, finish: oldFinish, ...rest } = plan
+  const finish = input.finish === undefined ? oldFinish : cleanText(String(input.finish))
+
+  return {
+    ...rest,
+    ...(finish === undefined || finish === '' ? {} : { finish }),
+    steps,
+    updatedAt: now,
+    ...(added.length > 0 ? { lastChange: { added: added.length, percentBefore: before ?? 0 } } : {}),
+  }
+}
+
+export const shouldAutoClose = (plan: Plan): boolean =>
+  plan.status === 'active' && plan.finish !== undefined && allLiveDone(plan)
