@@ -44,10 +44,12 @@ const MARK: Record<Exclude<StepStatus, 'dropped'>, string> = {
   pending: '○',
 }
 
-/** The plan as the model reads it back: `45% · 1✓ 2✓ 3◐ тесты · 4○ 5○`. */
+/**
+ * The plan as the model reads it back: `1✓ 2✓ 3◐ тесты · 4○ 5○`. No percent:
+ * it is for the person's eyes, and the model would repeat it in its answers.
+ */
 export const compact = (plan: Plan): string => {
   const steps = live(plan)
-  const value = percent(plan)
   const word = (step: Step): string =>
     step.id +
     MARK[step.status as Exclude<StepStatus, 'dropped'>] +
@@ -55,10 +57,10 @@ export const compact = (plan: Plan): string => {
   const cut = steps.findIndex(step => step.status === 'active') + 1
   const groups = cut === 0 ? [steps] : [steps.slice(0, cut), steps.slice(cut)]
 
-  return [
-    value === null ? '∞' : value + '%',
-    ...groups.filter(group => group.length > 0).map(group => group.map(word).join(' ')),
-  ].join(' · ')
+  return groups
+    .filter(group => group.length > 0)
+    .map(group => group.map(word).join(' '))
+    .join(' · ')
 }
 
 // ---------------------------------------------------------------- transitions

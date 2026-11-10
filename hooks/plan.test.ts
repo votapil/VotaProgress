@@ -31,12 +31,12 @@ test('compact перечисляет шаги с номерами', () => {
     step('3', 1, 'pending'),
     step('4', 1, 'dropped'),
   ])
-  expect(compact(p)).toBe('33% · 1✓ 2◐ тесты · 3○')
+  expect(compact(p)).toBe('1✓ 2◐ тесты · 3○')
 })
 
-test('compact при открытом финале начинается с ∞', () => {
+test('compact без процента и при открытом финале', () => {
   expect(compact(plan([step('1', 1, 'done'), step('2', 1, 'active', 'пачка')], null))).toBe(
-    '∞ · 1✓ 2◐ пачка',
+    '1✓ 2◐ пачка',
   )
 })
 

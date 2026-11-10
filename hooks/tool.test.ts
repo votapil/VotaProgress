@@ -23,25 +23,25 @@ test('схема: action обязателен, три действия', () => {
 test('start: план заведён', () => {
   const out = handle(EMPTY, START, T0)
   expect(out.isError).toBe(false)
-  expect(out.text).toBe('План заведён. 0% · 1◐ а · 2○ 3○')
+  expect(out.text).toBe('План заведён. 1◐ а · 2○ 3○')
   expect(out.record.plans).toHaveLength(1)
 })
 
 test('start поверх активного плана называет закрытый', () => {
   const out = handle(started(), { action: 'start', goal: 'Второй', steps: [{ text: 'г' }] }, T1)
-  expect(out.text).toBe('Прежний план «Мод» закрыт как abandoned. План заведён. ∞ · 1◐ г')
+  expect(out.text).toBe('Прежний план «Мод» закрыт как abandoned. План заведён. 1◐ г')
 })
 
 test('update: компактный план в ответе', () => {
   const out = handle(started(), { action: 'update', done: ['1'] }, T1)
   expect(out.isError).toBe(false)
-  expect(out.text).toBe('33% · 1✓ 2◐ б · 3○')
+  expect(out.text).toBe('1✓ 2◐ б · 3○')
 })
 
 test('update: остался один шаг - напоминание', () => {
   const one = handle(started(), { action: 'update', done: ['1'] }, T1).record
   const out = handle(one, { action: 'update', done: ['2'] }, T2)
-  expect(out.text).toBe('67% · 1✓ 2✓ 3◐ в · остался один шаг: отметь его до итогового ответа')
+  expect(out.text).toBe('1✓ 2✓ 3◐ в · остался один шаг: отметь его до итогового ответа')
 })
 
 test('close done перечисляет отброшенные шаги', () => {
@@ -77,7 +77,7 @@ test('PlanError: текст ошибки и текущий план, запис�
   const before = started()
   const out = handle(before, { action: 'update', done: ['9'] }, T1)
   expect(out.isError).toBe(true)
-  expect(out.text).toBe('В плане нет шага 9. Есть шаги: 1, 2, 3. Сейчас: 0% · 1◐ а · 2○ 3○')
+  expect(out.text).toBe('В плане нет шага 9. Есть шаги: 1, 2, 3. Сейчас: 1◐ а · 2○ 3○')
   expect(out.record).toBe(before)
 })
 

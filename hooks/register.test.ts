@@ -17,7 +17,7 @@ test('start основной сессией заводит план и пише�
   const w = world(on)
   await $.session.start(boot)
   const out = await call($, START)
-  expect(out.result).toBe('План заведён. 0% · 1◐ а · 2○')
+  expect(out.result).toBe('План заведён. 1◐ а · 2○')
   const stored = w.store.get('s:a') as SessionRecord
   expect(stored).toMatchObject({ v: 1, sessionId: 'a', project: '/home/u/Demo' })
   expect(stored.plans[0]).toMatchObject({ goal: 'Мод', status: 'active', createdAt: '2026-11-10T10:00:00.000Z' })
@@ -60,7 +60,7 @@ test('запись поднимается из хранилища после с�
   const w = world(on, { 's:a': kept })
   await $.session.start(boot)
   const out = await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
-  expect(out.result).toBe('∞ · 1✓ 2◐ б · остался один шаг: отметь его до итогового ответа')
+  expect(out.result).toBe('1✓ 2◐ б · остался один шаг: отметь его до итогового ответа')
 })
 
 test('отметка drop в хранилище применяется при подъёме', async ($, on) => {
@@ -83,7 +83,7 @@ test('отказ хранилища: инструмент отвечает ус�
   w.failSet = true
   await $.session.start(boot)
   const out = await call($, START)
-  expect(out.result).toBe('План заведён. 0% · 1◐ а · 2○')
+  expect(out.result).toBe('План заведён. 1◐ а · 2○')
 })
 
 // ------------------------------------------------- lifecycle, rule, reminders
@@ -151,7 +151,7 @@ test('после сжатия план приходит в context ближай�
   await $.session.start(boot)
   await call($, START)
   await raise($).session.compact({ trigger: 'auto', messages: [] })
-  expect((await edit($)).context).toEqual(['Контекст был сжат. Текущий план: «Мод». 0% · 1◐ а · 2○'])
+  expect((await edit($)).context).toEqual(['Контекст был сжат. Текущий план: «Мод». 1◐ а · 2○'])
   expect((await edit($)).context).toBe(undefined)
 })
 
@@ -161,7 +161,7 @@ test('после сжатия план приходит и с ближайшим
   await call($, START)
   await raise($).session.compact({ trigger: 'manual', messages: [] })
   const sent = await raise($).prompt.submit({ text: 'дальше' })
-  expect(sent.context).toEqual(['Контекст был сжат. Текущий план: «Мод». 0% · 1◐ а · 2○'])
+  expect(sent.context).toEqual(['Контекст был сжат. Текущий план: «Мод». 1◐ а · 2○'])
   expect((await edit($)).context).toBe(undefined)
 })
 
