@@ -1,4 +1,4 @@
-# VotaPlans
+# VotaProgress
 
 Мод для Claude Code: показывает, что уже сделано по задаче и что осталось.
 

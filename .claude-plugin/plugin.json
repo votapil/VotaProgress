@@ -1,5 +1,5 @@
 {
-  "name": "votaplans",
+  "name": "votaprogress",
   "version": "0.1.0",
   "description": "План задачи в панели сбоку от чата и в строке статуса",
   "types": "./types/index.d.ts"
