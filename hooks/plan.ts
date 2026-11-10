@@ -302,3 +302,70 @@ export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan =>
 
 export const shouldAutoClose = (plan: Plan): boolean =>
   plan.status === 'active' && plan.finish !== undefined && allLiveDone(plan)
+
+// ------------------------------------------------------------------- display
+
+/**
+ * Which steps fit in `rows` lines: done steps fold into one counter line, then
+ * the active step and what follows; what does not fit is counted in `more`.
+ */
+export const windowSteps = (
+  steps: Step[],
+  rows: number,
+): { doneCount: number; shown: Step[]; more: number } => {
+  const visible = steps.filter(step => step.status !== 'dropped')
+
+  if (visible.length <= rows) {
+    return { doneCount: 0, shown: visible, more: 0 }
+  }
+
+  const rest = visible.filter(step => step.status !== 'done')
+  const done = visible.length - rest.length
+
+  if (rows <= 1) {
+    return { doneCount: 0, shown: rest.slice(0, 1), more: 0 }
+  }
+
+  const doneCount = done > 0 ? done : 0
+  const room = rows - (doneCount > 0 ? 1 : 0)
+
+  if (rest.length <= room) {
+    return { doneCount, shown: rest, more: 0 }
+  }
+
+  const shown = rest.slice(0, Math.max(1, room - 1))
+
+  return { doneCount, shown, more: rest.length - shown.length }
+}
+
+export const projectName = (root: string): string =>
+  root.split('/').filter(part => part !== '').pop() ?? root
+
+const clip = (text: string, max: number): string => {
+  const chars = [...text]
+
+  return chars.length <= max ? text : chars.slice(0, max - 1).join('') + '…'
+}
+
+/** One line under the prompt: project, goal, progress and the step in hand. */
+export const statusLine = (
+  project: string,
+  plan: Plan | undefined,
+  isWaiting: boolean,
+): string | undefined => {
+  if (!plan) {
+    return undefined
+  }
+
+  const value = percent(plan)
+  const { done, total } = counts(plan)
+  const current = activeStep(plan)
+
+  return [
+    project,
+    clip(plan.goal, 40),
+    value === null ? '∞' : value + '%',
+    value === null ? 'сделано ' + done : done + '/' + total,
+    ...(current ? [(isWaiting ? 'ждёт ответа: ' : 'сейчас: ') + clip(current.text, 40)] : []),
+  ].join(' · ')
+}
