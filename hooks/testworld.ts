@@ -9,6 +9,14 @@ export type World = {
   sessionId: string
   registered: unknown[]
   failSet: boolean
+  /** Every store read is refused. */
+  failGet: boolean
+  /** `$.ui.open` is refused. */
+  failOpen: boolean
+  /** Whether the engine draws the mod's pane now; the terminal may widen later. */
+  drawn: boolean
+  /** The compaction is vetoed further down the chain. */
+  compactSkip: boolean
   store: Map<string, unknown>
   /** Whether a pane the mod opens gets drawn. */
   isPlaced: boolean
@@ -23,12 +31,16 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     sessionId: 'a',
     registered: [],
     failSet: false,
+    failGet: false,
+    failOpen: false,
+    drawn: false,
+    compactSkip: false,
     store,
     isPlaced: true,
     opened: [],
     statuses: [],
   }
-  on('store.get', (_, e) => ({ value: store.get(e.key) }))
+  on('store.get', (_, e) => (state.failGet ? { deny: 'store is down' } : { value: store.get(e.key) }))
   on('store.set', (_, e) => {
     if (state.failSet) {
       return { deny: 'store is full' }
@@ -60,18 +72,30 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     return { value: undefined }
   })
   on('ui.open', (_, e) => {
+    if (state.failOpen) {
+      return { deny: 'no pane' }
+    }
+
     state.opened.push(e)
+    state.drawn = state.isPlaced
 
     return { value: state.isPlaced ? { isPlaced: true } : { isPlaced: false, reason: 'narrow' } }
   })
-  on('ui.panes', () => ({ value: [] }))
+  on('ui.panes', () => ({
+    value: state.opened.slice(-1).map(one => ({
+      id: one.id,
+      title: one.title ?? one.id,
+      isShown: state.drawn,
+      isPlaced: state.drawn,
+    })),
+  }))
   on('ui.close', () => ({ value: undefined }))
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'x', scope: 'shared' as const }] }))
   on('prompt.submit', (_, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-  on('session.compact', () => ({ skip: 'test' }))
+  on('session.compact', (_, e) => (state.compactSkip ? { skip: 'test' } : { messages: e.messages }))
   on('tool.call', () => ({ result: {} }))
   on('command.run', () => ({}))
 
@@ -110,3 +134,6 @@ export const START = {
 }
 
 export const boot = { cwd: '/home/u/Demo', surface: 'terminal', isInteractive: true } as const
+
+/** A transcript for `session.compact`: a compaction leaves at least one message. */
+export const MESSAGES = [{ role: 'user', text: 'x', toolUses: [] }]

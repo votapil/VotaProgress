@@ -307,7 +307,9 @@ export const windowSteps = (
   const done = visible.length - rest.length
 
   if (rows <= 1) {
-    return { doneCount: 0, shown: rest.slice(0, 1), more: 0 }
+    const current = rest.find(step => step.status === 'active') ?? rest[0]
+
+    return { doneCount: 0, shown: current ? [current] : [], more: 0 }
   }
 
   const doneCount = done > 0 ? done : 0
@@ -317,7 +319,16 @@ export const windowSteps = (
     return { doneCount, shown: rest, more: 0 }
   }
 
-  const shown = rest.slice(0, Math.max(1, room - 1))
+  // The window opens at the step in hand, wherever the model moved it; the
+  // pending steps it jumped over are counted with the tail.
+  const from = Math.max(0, rest.findIndex(step => step.status === 'active'))
+  const tail = rest.slice(from)
+
+  if (from > 0 && tail.length < room) {
+    return { doneCount, shown: tail, more: from }
+  }
+
+  const shown = tail.slice(0, Math.max(1, room - 1))
 
   return { doneCount, shown, more: rest.length - shown.length }
 }

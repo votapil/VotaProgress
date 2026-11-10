@@ -82,3 +82,17 @@ test('projectName берёт последнюю часть пути', () => {
   expect(projectName('/home/votapil/Demo/')).toBe('Demo')
   expect(projectName('/')).toBe('/')
 })
+
+const JUMPED = [
+  step('1', 1, 'pending'),
+  step('2', 1, 'pending'),
+  step('3', 1, 'active'),
+  step('4', 1, 'pending'),
+  step('5', 1, 'pending'),
+]
+
+test('windowSteps: активный шаг вне порядка всегда показан', () => {
+  expect(windowSteps(JUMPED, 2)).toMatchObject({ shown: [JUMPED[2]], more: 4 })
+  expect(windowSteps(JUMPED, 1).shown).toEqual([JUMPED[2]])
+  expect(windowSteps(JUMPED, 4).shown.map(s => s.id)).toEqual(['3', '4', '5'])
+})

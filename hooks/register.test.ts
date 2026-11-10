@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { SessionRecord } from './plan'
 import { NUDGE, RULE } from './rule'
-import { START, boot, call, raise, world } from './testworld'
+import { MESSAGES, START, boot, call, raise, world } from './testworld'
 import type { World } from './testworld'
 import { TOOL_FULL } from './tool'
 
@@ -150,7 +150,7 @@ test('после сжатия план приходит в context ближай�
   world(on)
   await $.session.start(boot)
   await call($, START)
-  await raise($).session.compact({ trigger: 'auto', messages: [] })
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
   expect((await edit($)).context).toEqual(['Контекст был сжат. Текущий план: «Мод». 1◐ а · 2○'])
   expect((await edit($)).context).toBe(undefined)
 })
@@ -159,7 +159,7 @@ test('после сжатия план приходит и с ближайшим
   world(on)
   await $.session.start(boot)
   await call($, START)
-  await raise($).session.compact({ trigger: 'manual', messages: [] })
+  await raise($).session.compact({ trigger: 'manual', messages: MESSAGES })
   const sent = await raise($).prompt.submit({ text: 'дальше' })
   expect(sent.context).toEqual(['Контекст был сжат. Текущий план: «Мод». 1◐ а · 2○'])
   expect((await edit($)).context).toBe(undefined)
@@ -169,7 +169,7 @@ test('сжатие транскрипта субагента флаг не ст�
   world(on)
   await $.session.start(boot)
   await call($, START)
-  await raise($).session.compact({ trigger: 'auto', messages: [], agentId: 'a1' })
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES, agentId: 'a1' })
   expect((await edit($)).context).toBe(undefined)
 })
 
@@ -246,4 +246,77 @@ test('вызов progress после возобновления стирает e
   await raise($).session.end({ reason: 'other', sessionId: 'a', resume: { id: 'a' } })
   await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
   expect('endedAt' in (w.store.get('s:a') as object)).toBe(false)
+})
+
+test('сжатие precompute и отменённое сжатие план не повторяют', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  await raise($).session.compact({ trigger: 'precompute', messages: MESSAGES })
+  expect((await edit($)).context).toBe(undefined)
+  w.compactSkip = true
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  expect((await edit($)).context).toBe(undefined)
+})
+
+test('сжатие без плана: заведённый позже план не объявляется сжатым', async ($, on) => {
+  world(on)
+  await $.session.start(boot)
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  await raise($).prompt.submit({ text: 'дальше' })
+  await call($, START)
+  expect((await edit($)).context).toBe(undefined)
+})
+
+test('панель дорисована позже: строка под вводом уходит', async ($, on) => {
+  const w = world(on)
+  w.isPlaced = false
+  await $.session.start(boot)
+  await call($, START)
+  expect(typeof w.statuses.at(-1)).toBe('string')
+  w.drawn = true
+  await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
+  expect(w.statuses.at(-1)).toBe(undefined)
+})
+
+test('панель пропала без события: строка под вводом возвращается', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  expect(w.statuses.at(-1)).toBe(undefined)
+  w.drawn = false
+  await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
+  expect(typeof w.statuses.at(-1)).toBe('string')
+})
+
+test('session.end clear и resume снимают строку под вводом', async ($, on) => {
+  const w = world(on)
+  w.isPlaced = false
+  await $.session.start(boot)
+  await call($, START)
+  expect(typeof w.statuses.at(-1)).toBe('string')
+  await raise($).session.end({ reason: 'clear', sessionId: 'a', resume: { id: 'a' } })
+  expect(w.statuses.at(-1)).toBe(undefined)
+  w.sessionId = 'b'
+  await call($, START)
+  await raise($).session.end({ reason: 'resume', sessionId: 'b', resume: { id: 'b' } })
+  expect(w.statuses.at(-1)).toBe(undefined)
+})
+
+test('панель не открылась после записи плана: ответ всё равно успех', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  w.failOpen = true
+  const out = await call($, START)
+  expect(out.result).toBe('План заведён. 1◐ а · 2○')
+  expect((w.store.get('s:a') as SessionRecord).plans).toHaveLength(1)
+})
+
+test('хранилище не читается: инструмент работает на пустой записи', async ($, on) => {
+  const w = world(on)
+  w.failGet = true
+  await $.session.start(boot)
+  const out = await call($, START)
+  expect(out.result).toBe('План заведён. 1◐ а · 2○')
+  expect((await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })).result).toBe('1✓ 2◐ б · остался один шаг: отметь его до итогового ответа')
 })

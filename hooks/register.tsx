@@ -33,10 +33,7 @@ const flags = atom({ plugin: 'votaprogress', key: 'flags' } as const, {
   replanPending: false,
 })
 
-const pane = atom({ plugin: 'votaprogress', key: 'pane' } as const, {
-  isPlaced: false,
-  isWaiting: false,
-})
+const pane = atom({ plugin: 'votaprogress', key: 'pane' } as const, { isWaiting: false })
 
 // A third of a 144-column terminal, the narrowest one a pane opens in unasked.
 // The engine caps it at 45% and a width the person set by hand wins.
@@ -55,6 +52,22 @@ const kv = ($: $): Kv => ({
 
 const nowIso = async ($: $): Promise<string> => new Date(await $.clock.now()).toISOString()
 
+const raise = async ($: $, id: string): Promise<SessionRecord> => {
+  const stored = await loadRecord(kv($), id)
+
+  if (!stored) {
+    return emptyRecord(id, await $.session.root())
+  }
+
+  const record = await applyDrops(kv($), stored, await nowIso($))
+
+  if (record !== stored) {
+    await saveRecord(kv($), record)
+  }
+
+  return record
+}
+
 /** The record of the session the process runs now, raised from the store when it changed. */
 export const ensureSession = async ($: $): Promise<SessionRecord> => {
   const id = await $.session.id()
@@ -64,14 +77,13 @@ export const ensureSession = async ($: $): Promise<SessionRecord> => {
     return held.record
   }
 
-  const stored = await loadRecord(kv($), id)
-  const record = stored
-    ? await applyDrops(kv($), stored, await nowIso($))
-    : emptyRecord(id, await $.session.root())
+  // A store that cannot be read costs the history, not the tool: the session
+  // goes on with an empty record and the person is told plans are not kept.
+  const record = await raise($, id).catch(async () => {
+    await update($, flags, held => ({ ...held, storeFailed: true }))
 
-  if (stored && record !== stored) {
-    await saveRecord(kv($), record)
-  }
+    return emptyRecord(id, await $.session.root())
+  })
 
   await update($, session, () => ({ owner: id, record }))
 
@@ -86,9 +98,14 @@ export const commit = async ($: $, record: SessionRecord): Promise<void> => {
   await refreshStatus($)
 }
 
-/** The line under the prompt stands in for the pane while the pane is not drawn. */
+/**
+ * The line under the prompt stands in for the pane while the pane is not drawn.
+ * The engine is asked each time: it draws a waiting pane when the terminal
+ * widens and drops a broken one, and tells the mod of neither.
+ */
 export const refreshStatus = async ($: $): Promise<void> => {
-  const { isPlaced, isWaiting } = await read($, pane)
+  const isPlaced = (await $.ui.panes()).some(one => one.id === PANE && one.isPlaced)
+  const { isWaiting } = await read($, pane)
   const { record } = await read($, session)
   const plan = record ? activePlan(record) : undefined
 
@@ -99,7 +116,6 @@ export const refreshStatus = async ($: $): Promise<void> => {
 
 const openPane = async ($: $): Promise<boolean> => {
   const opened = await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS })
-  await update($, pane, held => ({ ...held, isPlaced: opened.isPlaced }))
   await refreshStatus($)
 
   return opened.isPlaced
@@ -126,15 +142,10 @@ const takeReplan = async ($: $): Promise<string | undefined> => {
     return undefined
   }
 
+  await update($, flags, held => ({ ...held, replanPending: false }))
   const plan = activePlan(await ensureSession($))
 
-  if (!plan) {
-    return undefined
-  }
-
-  await update($, flags, held => ({ ...held, replanPending: false }))
-
-  return replanText(plan)
+  return plan ? replanText(plan) : undefined
 }
 
 export const register: Register = on => {
@@ -147,9 +158,6 @@ export const register: Register = on => {
     await $.command.register({ name: 'progress', description: 'Показать план задачи в панели' })
     await ensureSession($)
     await prune(kv($), await nowIso($))
-    // A reload keeps a pane that was up: the engine's record says whether it is.
-    const isPlaced = (await $.ui.panes()).some(one => one.id === PANE && one.isPlaced)
-    await update($, pane, held => ({ ...held, isPlaced }))
     await refreshStatus($)
 
     return next(e)
@@ -171,9 +179,14 @@ export const register: Register = on => {
 
     await commit($, out.record)
 
-    // The first plan of a session brings the pane up, unless the person closed it.
-    if (e.action === 'start' && out.record.plans.length === 1 && !(await getPaneClosed(kv($)))) {
-      await openPane($)
+    // The first plan of a session brings the pane up, unless the person closed
+    // it. The plan is kept by now: a pane that fails must not read as a failed call.
+    if (e.action === 'start' && out.record.plans.length === 1) {
+      await (async () => {
+        if (!(await getPaneClosed(kv($)))) {
+          await openPane($)
+        }
+      })().catch(() => undefined)
     }
 
     return { result: out.text }
@@ -230,11 +243,15 @@ export const register: Register = on => {
   })
 
   on('session.compact', async ($, e, next) => {
-    if (e.agentId === undefined) {
+    const out = await next(e)
+
+    // Only a compaction that was installed in the main conversation: a
+    // precompute installs nothing and a vetoed one changed nothing.
+    if (e.agentId === undefined && e.trigger !== 'precompute' && out.skip === undefined) {
       await update($, flags, held => ({ ...held, replanPending: true }))
     }
 
-    return next(e)
+    return out
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -283,7 +300,6 @@ export const register: Register = on => {
     }
 
     const closed = await next(e)
-    await update($, pane, held => ({ ...held, isPlaced: false }))
     await refreshStatus($)
 
     return closed
@@ -313,6 +329,8 @@ export const register: Register = on => {
 
     if (e.reason === 'clear' || e.reason === 'resume') {
       await update($, session, () => ({ owner: null, record: null }))
+      await update($, flags, held => ({ ...held, replanPending: false }))
+      await refreshStatus($)
     }
 
     return next(e)
