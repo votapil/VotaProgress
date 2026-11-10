@@ -114,6 +114,9 @@ const setWaiting = async ($: $, isWaiting: boolean): Promise<void> => {
 }
 
 const OWN = 'mcp__votaprogress__progress'
+
+/** What a call of the mod's own tool carries that the hook reads. */
+type OwnCall = { agentId?: string; action?: unknown }
 const EDITING = new Set(['Edit', 'Write', 'NotebookEdit'])
 const NUDGE_AT = 3
 
@@ -152,7 +155,9 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('tool.call', { tool: 'mcp__votaprogress__progress' }, async ($, e) => {
+  // The generated tool types list other plugins' tools, never the mod's own:
+  // the matcher and the call's input are typed here by hand.
+  on('tool.call', { tool: 'mcp__votaprogress__progress' } as never, async ($: $, e: OwnCall) => {
     if (e.agentId !== undefined) {
       return { deny: 'план ведёт основная сессия' }
     }
@@ -172,7 +177,7 @@ export const register: Register = on => {
     }
 
     return { result: out.text }
-  })
+  }).catch(() => ({ deny: 'VotaProgress: инструмент дал сбой, план не изменён.' }))
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
@@ -200,7 +205,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
 
-    if (e.agentId !== undefined || e.tool === OWN || ran.deny !== undefined) {
+    if (e.agentId !== undefined || (e.tool as string) === OWN || ran.deny !== undefined) {
       return ran
     }
 
