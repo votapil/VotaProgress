@@ -343,7 +343,7 @@ export const clip = (text: string, max: number): string => {
   return chars.length <= max ? text : chars.slice(0, max - 1).join('') + '…'
 }
 
-/** One line under the prompt: project, goal, progress and the step in hand. */
+/** One line under the prompt: project, goal, steps done of all, the step in hand. */
 export const statusLine = (
   project: string,
   plan: Plan | undefined,
@@ -353,15 +353,13 @@ export const statusLine = (
     return undefined
   }
 
-  const value = percent(plan)
   const { done, total } = counts(plan)
   const current = activeStep(plan)
 
   return [
     project,
     clip(plan.goal, 40),
-    value === null ? '∞' : value + '%',
-    value === null ? 'сделано ' + done : done + '/' + total,
+    done + '/' + total,
     ...(current ? [(isWaiting ? 'ждёт ответа: ' : 'сейчас: ') + clip(current.text, 40)] : []),
   ].join(' · ')
 }

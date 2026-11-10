@@ -3,13 +3,12 @@
 
 import type { ElementTable, RenderSurface } from 'claude-code'
 
-import { activePlan, activeStep, clip, percent, projectName, windowSteps } from './plan'
+import { activePlan, activeStep, clip, counts, projectName, windowSteps } from './plan'
 import type { Plan, SessionRecord, Step } from './plan'
 
 export const PANE = 'votaprogress'
 export const PANE_TITLE = 'Прогресс'
 
-const BAR = 20
 const HISTORY = 3
 /** Marks a step of weight 3. */
 const HEAVY = '◆'
@@ -24,23 +23,6 @@ export type ChatView = {
   storeFailed: boolean
 }
 
-const bar = (value: number): string => {
-  const filled = Math.round((value / 100) * BAR)
-
-  return '█'.repeat(filled) + '░'.repeat(BAR - filled)
-}
-
-const plural = (count: number): string => {
-  const tail = count % 100
-  const last = count % 10
-
-  if (tail >= 11 && tail <= 14) {
-    return 'шагов'
-  }
-
-  return last === 1 ? 'шаг' : last >= 2 && last <= 4 ? 'шага' : 'шагов'
-}
-
 export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view: ChatView) => {
   const { Box, Text } = table
   const plan = view.record ? activePlan(view.record) : undefined
@@ -48,12 +30,13 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
     .filter(one => one.status !== 'active')
     .slice(-HISTORY)
     .reverse()
-  const value = plan ? percent(plan) : null
   const current = plan ? activeStep(plan) : undefined
-  const headline = value === null ? '∞' : value + '%'
+  // Steps done of all, never a percent: a plan grows as the work goes, and a
+  // percent that falls back reads as lost progress.
+  const tally = plan ? counts(plan) : { done: 0, total: 0 }
+  const headline = tally.done + ' из ' + tally.total
   const fixed =
     2 +
-    (value === null ? 0 : 1) +
     (plan?.finish === undefined ? 0 : 1) +
     1 +
     (earlier.length > 0 ? earlier.length + 2 : 0) +
@@ -85,7 +68,7 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
   const earlierRow = (one: Plan) =>
     row(
       (one.status === 'done' ? '✓ ' : '× ') + one.goal,
-      one.status === 'done' ? '100%' : 'брошен',
+      one.status === 'done' ? 'сделан' : 'брошен',
       true,
     )
 
@@ -97,16 +80,6 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
         <Box flexDirection="row" justifyContent="space-between">
           <Text>{clip(plan.goal, Math.max(1, view.columns - [...headline].length - 1))}</Text>
           <Text bold>{headline}</Text>
-        </Box>
-      )}
-      {plan && value !== null && (
-        <Box flexDirection="row" gap={1}>
-          <Text>{bar(value)}</Text>
-          {plan.lastChange && (
-            <Text dimColor>
-              {'+' + plan.lastChange.added + ' ' + plural(plan.lastChange.added) + ', было ' + plan.lastChange.percentBefore + '%'}
-            </Text>
-          )}
         </Box>
       )}
       {plan?.finish !== undefined && (

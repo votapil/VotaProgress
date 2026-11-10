@@ -20,7 +20,7 @@ const pane = (bodyRows = 20) =>
 
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
 
-test('панель показывает проект, цель, процент и активный шаг, на каждой поверхности', async ($, on) => {
+test('панель показывает проект, цель, счёт шагов и активный шаг, на каждой поверхности', async ($, on) => {
   world(on)
   await $.session.start(boot)
   await call($, { ...START, steps: [{ text: 'а' }, { text: 'б' }, { text: 'в', weight: 3 }] })
@@ -30,14 +30,14 @@ test('панель показывает проект, цель, процент �
     const ui = await $.ui.mount({ ...pane(), surface })
     expect((await ui.find({ type: 'Text', text: /^Demo$/ }))?.text).toBe('Demo')
     expect((await ui.find({ type: 'Text', text: /^Мод$/ }))?.text).toBe('Мод')
-    expect((await ui.find({ type: 'Text', text: /%$/ }))?.text).toBe('20%')
+    expect((await ui.find({ type: 'Text', text: / из / }))?.text).toBe('1 из 3')
+    expect(await ui.find({ type: 'Text', text: /%|█|░/ })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: /^финал/ }))?.text).toBe('финал: проверен')
     expect((await ui.find({ type: 'Text', text: /^◐/ }))?.text).toBe('◐ б')
     expect(await ui.find({ type: 'Text', text: /сейчас/ })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: /^○/ }))?.text).toBe('○ в')
     expect(await ui.find({ type: 'Text', text: /крупный/ })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: /◆/ }))?.text).toBe('◆')
-    expect((await ui.find({ type: 'Text', text: /█/ }))?.text).toBe('████░░░░░░░░░░░░░░░░')
     await ui.unmount()
   }
 })
@@ -51,13 +51,13 @@ test('без плана - строка «плана нет»', async ($, on) => 
   await ui.unmount()
 })
 
-test('открытый финал: ∞ и нет полосы', async ($, on) => {
+test('открытый финал: тот же счёт, строки финала нет', async ($, on) => {
   world(on)
   await $.session.start(boot)
   await call($, { tool: TOOL_FULL, action: 'start', goal: 'Разбор', steps: [{ text: 'а' }] })
   const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^∞$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /█|░/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: / из / }))?.text).toBe('0 из 1')
+  expect(await ui.find({ type: 'Text', text: /∞/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^финал/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -70,19 +70,20 @@ test('в низкой панели сделанные сжаты в счётчи
   await call($, { tool: TOOL_FULL, action: 'update', done: ['1', '2', '3'] })
   const ui = await $.ui.mount({ ...pane(9), surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /сделано/ }))?.text).toBe('✓ 3 сделано')
-  expect((await ui.find({ type: 'Text', text: /ещё/ }))?.text).toBe('… ещё 5')
-  expect((await ui.findAll({ type: 'Text', text: /^[◐○]/ })).map(t => t.text)).toEqual(['◐ шаг 4', '○ шаг 5'])
+  expect((await ui.find({ type: 'Text', text: /ещё/ }))?.text).toBe('… ещё 4')
+  expect((await ui.findAll({ type: 'Text', text: /^[◐○]/ })).map(t => t.text)).toEqual(['◐ шаг 4', '○ шаг 5', '○ шаг 6'])
   await ui.unmount()
 })
 
-test('добавленные шаги видны рядом с полосой', async ($, on) => {
+test('добавленные шаги меняют счёт, пометки «было» нет', async ($, on) => {
   world(on)
   await $.session.start(boot)
   await call($, START)
   await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
   await call($, { tool: TOOL_FULL, action: 'update', add: [{ text: 'в' }, { text: 'г' }] })
   const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /было/ }))?.text).toBe('+2 шага, было 50%')
+  expect((await ui.find({ type: 'Text', text: / из / }))?.text).toBe('1 из 4')
+  expect(await ui.find({ type: 'Text', text: /было|%/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -134,7 +135,7 @@ test('запомненное закрытие: первый start панель �
   await $.session.start(boot)
   await call($, START)
   expect(w.opened).toHaveLength(0)
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · сейчас: а')
+  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · сейчас: а')
 })
 
 // A person's close of the pane (`ui.close`, origin person) is a call on `$`,
@@ -162,7 +163,7 @@ test('панель не нарисована: строка статуса пок
   w.isPlaced = false
   await $.session.start(boot)
   await call($, START)
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · сейчас: а')
+  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · сейчас: а')
 })
 
 test('панель нарисована: строки статуса нет', async ($, on) => {
@@ -179,12 +180,12 @@ test('после конца хода статус и панель пишут «�
   await $.session.start(boot)
   await call($, START)
   await raise($).turn.complete({ answer: 'ок', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · ждёт ответа: а')
+  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · ждёт ответа: а')
   const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /^ждёт ответа$/ })).toBeDefined()
   await ui.unmount()
   await raise($).prompt.submit({ text: 'дальше' })
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · сейчас: а')
+  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · сейчас: а')
 })
 
 test('длинный шаг обрезается так, чтобы пометка справа поместилась в одну строку', async ($, on) => {
@@ -200,12 +201,12 @@ test('длинный шаг обрезается так, чтобы пометк
   await ui.unmount()
 })
 
-test('длинная цель обрезается под процент', async ($, on) => {
+test('длинная цель обрезается под счёт шагов', async ($, on) => {
   world(on)
   await $.session.start(boot)
   await call($, { ...START, goal: 'ц'.repeat(60) })
   const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /^ц/ }))?.text).toBe('ц'.repeat(36) + '…')
+  expect((await ui.find({ type: 'Text', text: /^ц/ }))?.text).toBe('ц'.repeat(32) + '…')
   await ui.unmount()
 })
 
@@ -214,7 +215,7 @@ test('план закрыт: строка статуса снимается', as
   w.isPlaced = false
   await $.session.start(boot)
   await call($, START)
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · сейчас: а')
+  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · сейчас: а')
   await call($, { tool: TOOL_FULL, action: 'close', outcome: 'abandoned' })
   expect(w.statuses.at(-1)).toBe(undefined)
 })
