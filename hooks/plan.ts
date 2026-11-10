@@ -1,34 +1,8 @@
 // The plan model and everything computed from it. Pure: no engine, no clock.
 
-export type StepStatus = 'pending' | 'active' | 'done' | 'dropped'
+import type { Plan, SessionRecord, Step, StepStatus } from '../types'
 
-export type Step = {
-  id: string
-  text: string
-  weight: 1 | 2 | 3
-  status: StepStatus
-}
-
-export type Plan = {
-  id: string
-  goal: string
-  finish?: string
-  steps: Step[]
-  status: 'active' | 'done' | 'abandoned'
-  createdAt: string
-  updatedAt: string
-  closedAt?: string
-  lastChange?: { added: number; percentBefore: number }
-}
-
-export type SessionRecord = {
-  v: 1
-  sessionId: string
-  project: string
-  plans: Plan[]
-  endedAt?: string
-  endReason?: string
-}
+export type { Plan, SessionRecord, Step, StepStatus } from '../types'
 
 const MAX_TEXT = 120
 
