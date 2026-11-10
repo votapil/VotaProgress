@@ -86,6 +86,7 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
       id: one.id,
       title: one.title ?? one.id,
       isShown: state.drawn,
+      isFocused: false,
       isPlaced: state.drawn,
     })),
   }))
