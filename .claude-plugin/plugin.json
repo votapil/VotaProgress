@@ -1,6 +1,7 @@
 {
   "name": "votaprogress",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "План задачи в панели сбоку от чата и в строке статуса",
   "types": "./types/index.d.ts"
 }
