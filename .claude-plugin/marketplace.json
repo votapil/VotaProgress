@@ -1,0 +1,5 @@
+{
+  "name": "votaprogress",
+  "owner": { "name": "votapil" },
+  "plugins": [{ "name": "votaprogress", "source": "./" }]
+}
