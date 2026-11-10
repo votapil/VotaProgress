@@ -7,10 +7,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { activePlan, closePlan, shouldAutoClose } from './plan'
+import { PANE, PANE_TITLE, projectOf, renderChat } from './pane'
+import { activePlan, closePlan, projectName, shouldAutoClose, statusLine } from './plan'
 import type { SessionRecord } from './plan'
 import { NUDGE, RULE, replanText } from './rule'
-import { applyDrops, emptyRecord, loadRecord, prune, saveRecord } from './storage'
+import {
+  applyDrops,
+  emptyRecord,
+  getPaneClosed,
+  loadRecord,
+  prune,
+  saveRecord,
+  setPaneClosed,
+} from './storage'
 import type { Kv } from './storage'
 import { handle, toolSpec } from './tool'
 
@@ -23,6 +32,15 @@ const flags = atom({ plugin: 'votaprogress', key: 'flags' } as const, {
   storeFailed: false,
   replanPending: false,
 })
+
+const pane = atom({ plugin: 'votaprogress', key: 'pane' } as const, {
+  isPlaced: false,
+  isWaiting: false,
+})
+
+// A third of a 144-column terminal, the narrowest one a pane opens in unasked.
+// The engine caps it at 45% and a width the person set by hand wins.
+const PANE_COLUMNS = 48
 
 type $ = EngineInterface
 
@@ -65,6 +83,34 @@ export const commit = async ($: $, record: SessionRecord): Promise<void> => {
   await update($, session, () => ({ owner: record.sessionId, record }))
   const isSaved = await saveRecord(kv($), record)
   await update($, flags, held => ({ ...held, storeFailed: !isSaved }))
+  await refreshStatus($)
+}
+
+/** The line under the prompt stands in for the pane while the pane is not drawn. */
+export const refreshStatus = async ($: $): Promise<void> => {
+  const { isPlaced, isWaiting } = await read($, pane)
+  const { record } = await read($, session)
+  const plan = record ? activePlan(record) : undefined
+
+  $.ui.status(
+    isPlaced || !record ? undefined : statusLine(projectName(record.project), plan, isWaiting),
+  )
+}
+
+const openPane = async ($: $): Promise<boolean> => {
+  const opened = await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS })
+  await update($, pane, held => ({ ...held, isPlaced: opened.isPlaced }))
+  await refreshStatus($)
+
+  return opened.isPlaced
+}
+
+const setWaiting = async ($: $, isWaiting: boolean): Promise<void> => {
+  if ((await read($, pane)).isWaiting !== isWaiting) {
+    await update($, pane, held => ({ ...held, isWaiting }))
+  }
+
+  await refreshStatus($)
 }
 
 const OWN = 'mcp__votaprogress__progress'
@@ -95,8 +141,13 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     await $.tool.register(toolSpec)
+    await $.command.register({ name: 'progress', description: 'Показать план задачи в панели' })
     await ensureSession($)
     await prune(kv($), await nowIso($))
+    // A reload keeps a pane that was up: the engine's record says whether it is.
+    const isPlaced = (await $.ui.panes()).some(one => one.id === PANE && one.isPlaced)
+    await update($, pane, held => ({ ...held, isPlaced }))
+    await refreshStatus($)
 
     return next(e)
   })
@@ -114,6 +165,11 @@ export const register: Register = on => {
     }
 
     await commit($, out.record)
+
+    // The first plan of a session brings the pane up, unless the person closed it.
+    if (e.action === 'start' && out.record.plans.length === 1 && !(await getPaneClosed(kv($)))) {
+      await openPane($)
+    }
 
     return { result: out.text }
   })
@@ -135,6 +191,7 @@ export const register: Register = on => {
     edits = 0
     isNudged = false
     await ensureSession($)
+    await setWaiting($, false)
     const replan = await takeReplan($)
 
     return next(replan === undefined ? e : { ...e, context: [...(e.context ?? []), replan] })
@@ -189,7 +246,56 @@ export const register: Register = on => {
       }
     }
 
+    if (e.agentId === undefined) {
+      await setWaiting($, true)
+    }
+
     return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      await setWaiting($, false)
+    }
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'progress' }, async $ => {
+    await setPaneClosed(kv($), false)
+    await ensureSession($)
+
+    return {
+      text: (await openPane($))
+        ? 'Панель прогресса открыта.'
+        : 'Панель не поместилась: план виден в строке под вводом.',
+    }
+  })
+
+  on('ui.close', { id: 'votaprogress' }, async ($, e, next) => {
+    if (e.origin.kind === 'person') {
+      await setPaneClosed(kv($), true)
+    }
+
+    const closed = await next(e)
+    await update($, pane, held => ({ ...held, isPlaced: false }))
+    await refreshStatus($)
+
+    return closed
+  })
+
+  on('ui.render', { component: 'Pane', requestId: 'votaprogress' }, async ($, e) => {
+    const { record } = await read($, session)
+    const { isWaiting } = await read($, pane)
+    const { storeFailed } = await read($, flags)
+
+    return renderChat($.ui.resolve(e), {
+      record,
+      project: projectOf(record, await $.session.root()),
+      rows: e.props.scroll.bodyRows,
+      isWaiting,
+      storeFailed,
+    })
   })
 
   on('session.end', async ($, e, next) => {

@@ -1,62 +1,10 @@
-import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import { expect, test } from 'claude-code/testing'
 
 import type { SessionRecord } from './plan'
 import { NUDGE, RULE } from './rule'
+import { START, boot, call, raise, world } from './testworld'
+import type { World } from './testworld'
 import { TOOL_FULL } from './tool'
-
-type World = { sessionId: string; registered: unknown[]; failSet: boolean; store: Map<string, unknown> }
-
-// Everything beneath the mod that these tests do not look at.
-const world = (on: On, entries: Record<string, unknown> = {}): World => {
-  const store = new Map<string, unknown>(Object.entries(entries))
-  const state: World = { sessionId: 'a', registered: [], failSet: false, store }
-  on('store.get', (_, e) => ({ value: store.get(e.key) }))
-  on('store.set', (_, e) => {
-    if (state.failSet) {
-      return { deny: 'store is full' }
-    }
-
-    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
-
-    return { value: undefined }
-  })
-  on('store.delete', (_, e) => {
-    store.delete(e.key)
-
-    return { value: undefined }
-  })
-  on('store.keys', () => ({ value: [...store.keys()] }))
-  mock.clock(on, { now: Date.parse('2026-11-10T10:00:00.000Z') })
-  on('session.id', () => ({ value: state.sessionId }))
-  on('session.root', () => ({ value: '/home/u/Demo' }))
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('tool.register', (_, e) => {
-    state.registered.push(e)
-
-    return { value: { tool: TOOL_FULL } }
-  })
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('ui.status', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'x', scope: 'shared' as const }] }))
-  on('prompt.submit', (_, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-  on('session.compact', () => ({ skip: 'test' }))
-  on('tool.call', () => ({ result: {} }))
-
-  return state
-}
-
-// The mod's own tool is not in the generated tool types until a session has
-// loaded it, so calls to it are typed here.
-type Answer = { result?: unknown; deny?: string; context?: readonly string[] }
-const call = ($: { tool: { call: (input: never) => Promise<unknown> } }, input: object): Promise<Answer> =>
-  $.tool.call(input as never) as Promise<Answer>
-
-const START = { tool: TOOL_FULL, action: 'start', goal: 'Мод', finish: 'проверен', steps: [{ text: 'а' }, { text: 'б' }] }
-const boot = { cwd: '/home/u/Demo', surface: 'terminal', isInteractive: true } as const
 
 test('session.start регистрирует инструмент progress с isDeferred false', async ($, on) => {
   const w = world(on)
@@ -139,16 +87,6 @@ test('отказ хранилища: инструмент отвечает ус�
 })
 
 // ------------------------------------------------- lifecycle, rule, reminders
-
-type Raise = {
-  prompt: {
-    compose: (e: object) => Promise<{ sections: { id: string; text: string; scope: string }[] }>
-    submit: (e: object) => Promise<{ text: string; context?: readonly string[] }>
-  }
-  turn: { complete: (e: object) => Promise<unknown> }
-  session: { end: (e: object) => Promise<unknown>; compact: (e: object) => Promise<unknown> }
-}
-const raise = ($: unknown): Raise => $ as Raise
 
 const edit = ($: Parameters<typeof call>[0], extra: object = {}) =>
   call($, { tool: 'Edit', file_path: '/x', old_string: 'a', new_string: 'b', ...extra })

@@ -41,7 +41,12 @@ export type Flags = {
   replanPending: boolean
 }
 
-export type PaneState = { isPlaced: boolean }
+export type PaneState = {
+  /** A surface draws the pane now; while it does, the status line is off. */
+  isPlaced: boolean
+  /** The turn ended and the next prompt has not come: the step waits on the person. */
+  isWaiting: boolean
+}
 
 declare module 'claude-code' {
   interface PluginState {
