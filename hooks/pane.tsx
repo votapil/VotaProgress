@@ -11,6 +11,8 @@ export const PANE_TITLE = 'Прогресс'
 
 const BAR = 20
 const HISTORY = 3
+/** Marks a step of weight 3. */
+const HEAVY = '◆'
 
 export type ChatView = {
   record: SessionRecord | null
@@ -67,12 +69,12 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
   const stepRow = (step: Step) =>
     row(
       (step.status === 'done' ? '✓ ' : step.status === 'active' ? '◐ ' : '○ ') + step.text,
-      step.id === current?.id
-        ? view.isWaiting
-          ? 'ждёт ответа'
-          : '← сейчас'
-        : step.weight === 3
-          ? 'крупный'
+      // The circle already says which step is in hand; the tag is for what it
+      // cannot say: the step waits on the person, or it is a heavy one.
+      step.id === current?.id && view.isWaiting
+        ? 'ждёт ответа'
+        : step.weight === 3 && step.status !== 'done'
+          ? HEAVY
           : undefined,
       step.status !== 'active',
     )

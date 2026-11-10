@@ -33,9 +33,10 @@ test('панель показывает проект, цель, процент �
     expect((await ui.find({ type: 'Text', text: /%$/ }))?.text).toBe('20%')
     expect((await ui.find({ type: 'Text', text: /^финал/ }))?.text).toBe('финал: проверен')
     expect((await ui.find({ type: 'Text', text: /^◐/ }))?.text).toBe('◐ б')
-    expect(await ui.find({ type: 'Text', text: /^← сейчас$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /сейчас/ })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: /^○/ }))?.text).toBe('○ в')
-    expect(await ui.find({ type: 'Text', text: /^крупный$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /крупный/ })).toBeUndefined()
+    expect((await ui.find({ type: 'Text', text: /◆/ }))?.text).toBe('◆')
     expect((await ui.find({ type: 'Text', text: /█/ }))?.text).toBe('████░░░░░░░░░░░░░░░░')
     await ui.unmount()
   }
