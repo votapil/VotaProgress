@@ -187,6 +187,28 @@ test('после конца хода статус и панель пишут «�
   expect(w.statuses.at(-1)).toBe('Demo · Мод · 0% · 0/2 · сейчас: а')
 })
 
+test('длинный шаг обрезается так, чтобы пометка справа поместилась в одну строку', async ($, on) => {
+  world(on)
+  await $.session.start(boot)
+  await call($, { ...START, steps: [{ text: 'Закрыть панель, строка статуса, /progress и ещё' }, { text: 'б' }] })
+  await raise($).turn.complete({ answer: 'ок', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
+  const left = (await ui.find({ type: 'Text', text: /^◐/ }))?.text ?? ''
+  // 40 columns: the text, one space, then «ждёт ответа» (11 characters).
+  expect(left).toBe('◐ Закрыть панель, строка ст…')
+  expect([...left].length).toBe(40 - 11 - 1)
+  await ui.unmount()
+})
+
+test('длинная цель обрезается под процент', async ($, on) => {
+  world(on)
+  await $.session.start(boot)
+  await call($, { ...START, goal: 'ц'.repeat(60) })
+  const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^ц/ }))?.text).toBe('ц'.repeat(36) + '…')
+  await ui.unmount()
+})
+
 test('план закрыт: строка статуса снимается', async ($, on) => {
   const w = world(on)
   w.isPlaced = false

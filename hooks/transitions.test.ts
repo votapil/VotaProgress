@@ -176,3 +176,8 @@ test('shouldAutoClose: false при открытом финале и при не
   expect(shouldAutoClose(ALL_DONE_OPEN)).toBe(false)
   expect(shouldAutoClose(TWO)).toBe(false)
 })
+
+test('update goal: переименовывает цель, пустая - ошибка', () => {
+  expect(updatePlan(THREE, { goal: ' Новая\nцель ' }, T1).goal).toBe('Новая цель')
+  expect(throwsPlanError(() => updatePlan(THREE, { goal: '  ' }, T1))).toBe(true)
+})

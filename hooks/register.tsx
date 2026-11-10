@@ -298,6 +298,7 @@ export const register: Register = on => {
       record,
       project: projectOf(record, await $.session.root()),
       rows: e.props.scroll.bodyRows,
+      columns: e.props.bodyColumns,
       isWaiting,
       storeFailed,
     })

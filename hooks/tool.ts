@@ -23,7 +23,7 @@ export const toolSpec: ToolSpec = {
   description: [
     'Ведёт план текущей задачи: пользователь видит его в панели и в строке под вводом.',
     'start - завести план: goal (цель), finish (критерий конца; не передавай, если финал открыт), steps (шаги по порядку). Первый шаг сразу активен.',
-    'update - изменить план: done (номера сделанных шагов; следующий шаг активируется сам), active (сделать шаг активным вне порядка), add (новые шаги, after - после какого номера), drop (убрать шаги), finish (новый критерий конца).',
+    'update - изменить план: done (номера сделанных шагов; следующий шаг активируется сам), active (сделать шаг активным вне порядка), add (новые шаги, after - после какого номера), drop (убрать шаги), finish (новый критерий конца), goal (переименовать цель).',
     'close - закрыть план: outcome done или abandoned. План с критерием конца закрывается сам, когда все шаги сделаны и ход закончен.',
     'Закрыл шаг - один вызов update. Ответ всегда содержит план с номерами шагов.',
   ].join('\n'),
@@ -31,7 +31,7 @@ export const toolSpec: ToolSpec = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['start', 'update', 'close'] },
-      goal: { type: 'string', description: 'start: цель задачи, одной фразой.' },
+      goal: { type: 'string', description: 'start: цель задачи, одной фразой, без названия проекта. update: новая формулировка цели.' },
       finish: { type: 'string', description: 'start, update: по чему понятно, что задача закончена.' },
       steps: { type: 'array', items: STEP, description: 'start: шаги плана, от 1 до 30.' },
       done: { type: 'array', items: { type: 'string' }, description: 'update: номера сделанных шагов.' },
@@ -140,6 +140,7 @@ export const handle = (
           ...(add ? { add } : {}),
           ...(call.active === undefined || call.active === null ? {} : { active: String(call.active) }),
           ...(typeof call.finish === 'string' ? { finish: call.finish } : {}),
+          ...(typeof call.goal === 'string' ? { goal: call.goal } : {}),
         },
         now,
       )

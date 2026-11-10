@@ -107,3 +107,9 @@ test('успешный вызов стирает endedAt и endReason', () => {
   expect('endedAt' in out.record).toBe(false)
   expect('endReason' in out.record).toBe(false)
 })
+
+test('update goal: цель меняется через инструмент', () => {
+  const out = handle(started(), { action: 'update', goal: 'Живая проверка' }, T1)
+  expect(out.isError).toBe(false)
+  expect(out.record.plans[0]!.goal).toBe('Живая проверка')
+})

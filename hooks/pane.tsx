@@ -3,7 +3,7 @@
 
 import type { ElementTable, RenderSurface } from 'claude-code'
 
-import { activePlan, activeStep, percent, projectName, windowSteps } from './plan'
+import { activePlan, activeStep, clip, percent, projectName, windowSteps } from './plan'
 import type { Plan, SessionRecord, Step } from './plan'
 
 export const PANE = 'votaprogress'
@@ -17,8 +17,9 @@ const HEAVY = '◆'
 export type ChatView = {
   record: SessionRecord | null
   project: string
-  /** Rows the pane's body has. */
+  /** Rows and columns the pane's body has. */
   rows: number
+  columns: number
   isWaiting: boolean
   storeFailed: boolean
 }
@@ -49,6 +50,7 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
     .reverse()
   const value = plan ? percent(plan) : null
   const current = plan ? activeStep(plan) : undefined
+  const headline = value === null ? '∞' : value + '%'
   const fixed =
     2 +
     (value === null ? 0 : 1) +
@@ -58,10 +60,12 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
     (view.storeFailed ? 2 : 0)
   const shown = plan ? windowSteps(plan.steps, Math.max(1, view.rows - fixed)) : undefined
 
+  // The left text is cut here, to the cells the tag on the right leaves: left
+  // to the surface, a long text pushes the tag onto a second line.
   const row = (left: string, right?: string, isDim = false) => (
     <Box flexDirection="row" justifyContent="space-between">
-      <Text dimColor={isDim} wrap="truncate-end">
-        {left}
+      <Text dimColor={isDim}>
+        {clip(left, Math.max(1, view.columns - (right === undefined ? 0 : [...right].length + 1)))}
       </Text>
       {right === undefined ? null : <Text dimColor>{right}</Text>}
     </Box>
@@ -91,8 +95,8 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
       {!plan && <Text dimColor>плана нет</Text>}
       {plan && (
         <Box flexDirection="row" justifyContent="space-between">
-          <Text wrap="truncate-end">{plan.goal}</Text>
-          <Text bold>{value === null ? '∞' : value + '%'}</Text>
+          <Text>{clip(plan.goal, Math.max(1, view.columns - [...headline].length - 1))}</Text>
+          <Text bold>{headline}</Text>
         </Box>
       )}
       {plan && value !== null && (
@@ -106,9 +110,7 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
         </Box>
       )}
       {plan?.finish !== undefined && (
-        <Text dimColor wrap="truncate-end">
-          {'финал: ' + plan.finish}
-        </Text>
+        <Text dimColor>{clip('финал: ' + plan.finish, view.columns)}</Text>
       )}
       {shown && (
         <Box flexDirection="column" marginTop={1}>

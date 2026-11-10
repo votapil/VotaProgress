@@ -78,6 +78,7 @@ export type UpdateInput = {
   add?: { text: string; weight?: number; after?: string }[]
   drop?: string[]
   finish?: string
+  goal?: string
 }
 
 const MAX_STEPS = 30
@@ -262,11 +263,18 @@ export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan =>
     }
   }
 
+  const goal = input.goal === undefined ? plan.goal : cleanText(String(input.goal))
+
+  if (goal === '') {
+    throw new PlanError('У плана пустая цель (goal).')
+  }
+
   const { lastChange: _lastChange, finish: oldFinish, ...rest } = plan
   const finish = input.finish === undefined ? oldFinish : cleanText(String(input.finish))
 
   return {
     ...rest,
+    goal,
     ...(finish === undefined || finish === '' ? {} : { finish }),
     steps,
     updatedAt: now,
@@ -315,7 +323,8 @@ export const windowSteps = (
 export const projectName = (root: string): string =>
   root.split('/').filter(part => part !== '').pop() ?? root
 
-const clip = (text: string, max: number): string => {
+/** Cuts `text` to `max` characters, the last one an ellipsis when it was cut. */
+export const clip = (text: string, max: number): string => {
   const chars = [...text]
 
   return chars.length <= max ? text : chars.slice(0, max - 1).join('') + '…'
