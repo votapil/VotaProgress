@@ -186,6 +186,30 @@ test('после сжатия план приходит и с ближайшим
   expect((await edit($)).context).toBe(undefined)
 })
 
+test('сжатие при заведённом плане пишет момент в compactions, хранится 20 последних', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  expect((w.store.get('s:a') as SessionRecord).compactions).toEqual(['2026-11-10T10:00:00.000Z'])
+
+  for (let i = 0; i < 21; i += 1) {
+    await w.clock.advance(60 * 1000)
+    await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  }
+
+  const kept = (w.store.get('s:a') as SessionRecord).compactions ?? []
+  expect(kept).toHaveLength(20)
+  expect(kept.at(-1)).toBe('2026-11-10T10:21:00.000Z')
+})
+
+test('сжатие без планов записи не заводит', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  expect(w.store.has('s:a')).toBe(false)
+})
+
 test('сжатие транскрипта субагента флаг не ставит', async ($, on) => {
   world(on)
   await $.session.start(boot)

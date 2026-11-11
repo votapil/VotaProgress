@@ -3,8 +3,8 @@
 
 import type { ElementTable, RenderSurface } from 'claude-code'
 
-import { activePlan, clip, counts, projectName, windowSteps } from './plan'
-import type { Plan, SessionRecord, Step } from './plan'
+import { activePlan, clip, counts, history, projectName, windowSteps } from './plan'
+import type { HistoryRow, SessionRecord, Step } from './plan'
 
 export const PANE = 'votaprogress'
 export const PANE_TITLE = 'Прогресс'
@@ -12,6 +12,7 @@ export const PANE_TITLE = 'Прогресс'
 const HISTORY = 3
 /** Marks a step of weight 3. */
 const HEAVY = '◆'
+const COMPACTED = '----- сжатие -----'
 
 export type ChatView = {
   record: SessionRecord | null
@@ -25,10 +26,7 @@ export type ChatView = {
 export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view: ChatView) => {
   const { Box, Text } = table
   const plan = view.record ? activePlan(view.record) : undefined
-  const earlier = (view.record?.plans ?? [])
-    .filter(one => one.status !== 'active')
-    .slice(-HISTORY)
-    .reverse()
+  const earlier = view.record ? history(view.record, HISTORY) : []
   // Steps done of all, never a percent: a plan grows as the work goes, and a
   // percent that falls back reads as lost progress.
   const tally = plan ? counts(plan) : { done: 0, total: 0 }
@@ -58,11 +56,15 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
       step.weight === 3 && step.status !== 'done' ? HEAVY : undefined,
       step.status !== 'active',
     )
-  const earlierRow = (one: Plan) =>
-    row(
-      (one.status === 'done' ? '✓ ' : '× ') + one.goal,
-      one.status === 'done' ? 'сделан' : 'брошен',
-      true,
+  const earlierRow = (one: HistoryRow) =>
+    'plan' in one ? (
+      row(
+        (one.plan.status === 'done' ? '✓ ' : '× ') + one.plan.goal,
+        one.plan.status === 'done' ? 'сделан' : 'брошен',
+        true,
+      )
+    ) : (
+      <Text dimColor>{COMPACTED}</Text>
     )
 
   return (

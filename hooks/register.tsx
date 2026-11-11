@@ -126,6 +126,7 @@ const openPane = async ($: $): Promise<boolean> => {
 }
 
 const OWN = 'mcp__votaprogress__progress'
+const COMPACTIONS = 20
 
 /** What a call of the mod's own tool carries that the hook reads. */
 type OwnCall = { agentId?: string; action?: unknown }
@@ -245,6 +246,14 @@ export const register: Register = on => {
     // precompute installs nothing and a vetoed one changed nothing.
     if (e.agentId === undefined && e.trigger !== 'precompute' && out.skip === undefined) {
       await update($, flags, held => ({ ...held, replanPending: true }))
+      const record = await ensureSession($)
+
+      // Marked only where there is a plan to stand above: a session without
+      // plans keeps no record.
+      if (record.plans.length > 0) {
+        const compactions = [...(record.compactions ?? []), await nowIso($)].slice(-COMPACTIONS)
+        await commit($, { ...record, compactions })
+      }
     }
 
     return out

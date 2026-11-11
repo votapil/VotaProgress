@@ -26,6 +26,8 @@ export type SessionRecord = {
   sessionId: string
   project: string
   plans: Plan[]
+  /** When the context was compacted, oldest first, the last 20 kept. */
+  compactions?: string[]
   endedAt?: string
   endReason?: string
 }

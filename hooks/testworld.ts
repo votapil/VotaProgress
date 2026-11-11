@@ -1,6 +1,7 @@
 // The engine beneath the mod, as the integration tests stand in for it.
 // Not loaded by the mod.
 import { mock } from 'claude-code/testing'
+import type { MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { TOOL_FULL } from './tool'
@@ -23,6 +24,8 @@ export type World = {
   opened: { id: string; title?: string; columns?: number }[]
   /** Every `$.ui.status` the mod set, in order. */
   statuses: (string | undefined)[]
+  /** The engine's clock: `advance` moves it on. */
+  clock: MockClock
 }
 
 export const world = (on: On, entries: Record<string, unknown> = {}): World => {
@@ -39,6 +42,7 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     isPlaced: true,
     opened: [],
     statuses: [],
+    clock: undefined as unknown as MockClock,
   }
   on('store.get', (_, e) => (state.failGet ? { deny: 'store is down' } : { value: store.get(e.key) }))
   on('store.set', (_, e) => {
@@ -56,7 +60,7 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     return { value: undefined }
   })
   on('store.keys', () => ({ value: [...store.keys()] }))
-  mock.clock(on, { now: Date.parse('2026-11-10T10:00:00.000Z') })
+  state.clock = mock.clock(on, { now: Date.parse('2026-11-10T10:00:00.000Z') })
   on('session.id', () => ({ value: state.sessionId }))
   on('session.root', () => ({ value: '/home/u/Demo' }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))

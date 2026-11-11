@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { START, boot, call, raise, world } from './testworld'
+import { MESSAGES, START, boot, call, raise, world } from './testworld'
 import { TOOL_FULL } from './tool'
 
 const pane = (bodyRows = 20) =>
@@ -105,6 +105,25 @@ test('закрытые планы сессии под «Раньше в этом
   ])
   expect(await ui.find({ type: 'Text', text: /^брошен$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Первый/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('место сжатия отмечено строкой между закрытыми планами', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, { tool: TOOL_FULL, action: 'start', goal: 'Первый', finish: 'ок', steps: [{ text: 'а' }] })
+  await call($, { tool: TOOL_FULL, action: 'close', outcome: 'done' })
+  await w.clock.advance(60 * 1000)
+  await raise($).session.compact({ trigger: 'auto', messages: MESSAGES })
+  await w.clock.advance(60 * 1000)
+  await call($, { tool: TOOL_FULL, action: 'start', goal: 'Второй', finish: 'ок', steps: [{ text: 'а' }] })
+  await call($, { tool: TOOL_FULL, action: 'close', outcome: 'done' })
+  const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
+  expect((await ui.findAll({ type: 'Text', text: /^(✓ |-----)/ })).map(t => t.text)).toEqual([
+    '✓ Второй',
+    '----- сжатие -----',
+    '✓ Первый',
+  ])
   await ui.unmount()
 })
 

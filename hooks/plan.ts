@@ -328,6 +328,37 @@ export const windowSteps = (
   return { doneCount, shown, more: rest.length - shown.length }
 }
 
+/** A row of «Раньше в этом чате»: a closed plan, or the line where the context was compacted. */
+export type HistoryRow = { plan: Plan } | { compaction: true }
+
+/**
+ * The session's last `limit` closed plans, newest first. A compaction line
+ * stands above a plan when the context was compacted after that plan closed
+ * and before the one above it did.
+ */
+export const history = (record: SessionRecord, limit: number): HistoryRow[] => {
+  const marks = (record.compactions ?? []).map(Date.parse).filter(Number.isFinite)
+  const plans = record.plans
+    .filter(plan => plan.status !== 'active')
+    .slice(-limit)
+    .reverse()
+  const rows: HistoryRow[] = []
+  let above = Infinity
+
+  for (const plan of plans) {
+    const closed = Date.parse(plan.closedAt ?? plan.updatedAt)
+
+    if (marks.some(mark => mark > closed && mark <= above)) {
+      rows.push({ compaction: true })
+    }
+
+    rows.push({ plan })
+    above = closed
+  }
+
+  return rows
+}
+
 export const projectName = (root: string): string =>
   root.split('/').filter(part => part !== '').pop() ?? root
 
