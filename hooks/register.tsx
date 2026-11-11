@@ -72,7 +72,16 @@ export const ensureSession = async ($: $): Promise<SessionRecord> => {
   const held = await read($, session)
 
   if (held.owner === id && held.record) {
-    return held.record
+    // A plan dropped from another session's overview closes before the next
+    // write; a store that cannot be read leaves the record as it is.
+    const marked = await (async () =>
+      applyDrops(kv($), held.record!, await nowIso($)))().catch(() => held.record!)
+
+    if (marked !== held.record) {
+      await commit($, marked)
+    }
+
+    return marked
   }
 
   // A store that cannot be read costs the history, not the tool: the session

@@ -2,7 +2,7 @@
 // marks, never keys: the backing store can change without touching callers.
 
 import { closePlan } from './plan'
-import type { SessionRecord } from './plan'
+import type { Plan, SessionRecord, Step } from './plan'
 
 /** The shape of `$.store`. */
 export type Kv = {
@@ -26,22 +26,60 @@ export const emptyRecord = (sessionId: string, project: string): SessionRecord =
   plans: [],
 })
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isText = (value: unknown): value is string => typeof value === 'string'
+
+const isMaybeText = (value: unknown): boolean => value === undefined || isText(value)
+
+const STEP_STATUS = new Set(['pending', 'active', 'done', 'dropped'])
+const PLAN_STATUS = new Set(['active', 'done', 'abandoned'])
+
+const isStep = (value: unknown): value is Step =>
+  isObject(value) &&
+  isText(value.id) &&
+  isText(value.text) &&
+  (value.weight === 1 || value.weight === 2 || value.weight === 3) &&
+  STEP_STATUS.has(value.status as string)
+
+/** A plan another version or another session wrote, checked field by field. */
+export const asPlan = (value: unknown): Plan | undefined =>
+  isObject(value) &&
+  isText(value.id) &&
+  isText(value.goal) &&
+  isText(value.createdAt) &&
+  isText(value.updatedAt) &&
+  isMaybeText(value.finish) &&
+  isMaybeText(value.closedAt) &&
+  PLAN_STATUS.has(value.status as string) &&
+  Array.isArray(value.steps) &&
+  value.steps.every(isStep)
+    ? (value as Plan)
+    : undefined
+
+// A broken plan costs itself alone: the record keeps the plans that read.
 const asRecord = (value: unknown, sessionId?: string): SessionRecord | undefined => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isObject(value)) {
     return undefined
   }
 
-  const record = value as Partial<SessionRecord>
-
-  if (record.v !== 1 || typeof record.sessionId !== 'string' || !Array.isArray(record.plans)) {
+  if (
+    value.v !== 1 ||
+    !isText(value.sessionId) ||
+    !isText(value.project) ||
+    !Array.isArray(value.plans)
+  ) {
     return undefined
   }
 
-  if (sessionId !== undefined && record.sessionId !== sessionId) {
+  if (sessionId !== undefined && value.sessionId !== sessionId) {
     return undefined
   }
 
-  return record as SessionRecord
+  const plans = value.plans.map(asPlan).filter((plan): plan is Plan => plan !== undefined)
+
+  return { ...(value as SessionRecord), plans }
 }
 
 export const loadRecord = async (kv: Kv, sessionId: string): Promise<SessionRecord | undefined> =>
@@ -56,6 +94,33 @@ export const saveRecord = async (kv: Kv, record: SessionRecord): Promise<boolean
   } catch {
     return false
   }
+}
+
+/**
+ * Every session's record, the drop marks laid over them: a marked plan reads
+ * as abandoned, its date kept. The marks stay for their owners to apply.
+ */
+export const loadAll = async (kv: Kv): Promise<SessionRecord[]> => {
+  const keys = await kv.keys()
+  const marks = new Set(keys.filter(key => key.startsWith(DROP)))
+  const records: SessionRecord[] = []
+
+  for (const key of keys.filter(one => one.startsWith(RECORD))) {
+    const record = asRecord(await kv.get(key))
+
+    if (!record) {
+      continue
+    }
+
+    const plans = record.plans.map(plan =>
+      plan.status === 'active' && marks.has(DROP + record.sessionId + ':' + plan.id)
+        ? { ...plan, status: 'abandoned' as const }
+        : plan,
+    )
+    records.push({ ...record, plans })
+  }
+
+  return records
 }
 
 /** Asks the owning session to abandon one of its plans; it applies the mark itself. */

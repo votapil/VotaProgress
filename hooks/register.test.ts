@@ -78,6 +78,27 @@ test('отметка drop в хранилище применяется при п
   expect((w.store.get('s:a') as SessionRecord).plans[0]!.status).toBe('abandoned')
 })
 
+test('отметка drop на план живой сессии применяется до следующего вызова', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  w.store.set('drop:a:p1', true)
+  const out = await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
+  expect(out.deny).toBe('Нет активного плана. Вызови progress с action: "start".')
+  expect((w.store.get('s:a') as SessionRecord).plans[0]!.status).toBe('abandoned')
+  expect(w.store.has('drop:a:p1')).toBe(false)
+})
+
+test('отметка drop на план живой сессии применяется и на сообщении пользователя', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  w.store.set('drop:a:p1', true)
+  await raise($).prompt.submit({ text: 'дальше' })
+  expect((w.store.get('s:a') as SessionRecord).plans[0]!.status).toBe('abandoned')
+  expect(w.store.has('drop:a:p1')).toBe(false)
+})
+
 test('отказ хранилища: инструмент отвечает успехом', async ($, on) => {
   const w = world(on)
   w.failSet = true

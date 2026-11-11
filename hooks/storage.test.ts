@@ -5,6 +5,7 @@ import {
   applyDrops,
   emptyRecord,
   getPaneClosed,
+  loadAll,
   loadRecord,
   markDropped,
   prune,
@@ -156,4 +157,65 @@ test('paneClosed: отказ хранилища не бросает', async () =
   kv.failSet = true
   await setPaneClosed(kv, true)
   expect(await getPaneClosed(kv)).toBe(false)
+})
+
+// ------------------------------------------------------------ every record
+
+const broken: unknown[] = [
+  null,
+  'план',
+  { id: 'p9', goal: 'без шагов', status: 'active', createdAt: T0, updatedAt: T0 },
+  { id: 'p9', goal: 'шаг без текста', steps: [{ id: '1', weight: 1, status: 'active' }], status: 'active', createdAt: T0, updatedAt: T0 },
+  { id: 'p9', goal: 'чужой статус', steps: [], status: 'paused', createdAt: T0, updatedAt: T0 },
+  { id: 'p9', goal: 'шаг с весом 7', steps: [{ id: '1', text: 'а', weight: 7, status: 'active' }], status: 'active', createdAt: T0, updatedAt: T0 },
+  { id: 'p9', goal: 'без даты', steps: [], status: 'done', createdAt: T0 },
+]
+
+test('load: битый план пропускается, остальные остаются', async () => {
+  const kv = memory()
+  const good = record('a', T0, 'active')
+
+  for (const bad of broken) {
+    kv.map.set('s:a', { ...good, plans: [bad, ...good.plans] })
+    expect((await loadRecord(kv, 'a'))?.plans).toEqual(good.plans)
+  }
+})
+
+test('load: запись без project пропускается', async () => {
+  const kv = memory()
+  const { project: _project, ...rest } = record('a', T0)
+  kv.map.set('s:a', rest)
+  expect(await loadRecord(kv, 'a')).toBe(undefined)
+})
+
+test('loadAll читает все записи, мусор и чужие ключи пропускает', async () => {
+  const kv = memory()
+  await saveRecord(kv, record('a', T0))
+  await saveRecord(kv, { ...record('b', T1), project: '/home/u/Shop' })
+  kv.map.set('s:junk', 'строка')
+  kv.map.set('s:old', { v: 2, sessionId: 'old', project: '/p', plans: [] })
+  kv.map.set('meta:prunedAt', T0)
+  kv.map.set('pref:paneClosed', true)
+  const all = await loadAll(kv)
+  expect(all.map(one => one.sessionId).sort()).toEqual(['a', 'b'])
+})
+
+test('loadAll: отметка делает план брошенным, дата и сама отметка остаются', async () => {
+  const kv = memory()
+  await saveRecord(kv, record('a', T0, 'active'))
+  await saveRecord(kv, record('b', T0, 'active'))
+  await markDropped(kv, 'a', 'p1')
+  const all = await loadAll(kv)
+  const byId = new Map(all.map(one => [one.sessionId, one]))
+  expect(byId.get('a')!.plans[0]).toMatchObject({ status: 'abandoned', updatedAt: T0 })
+  expect(byId.get('b')!.plans[0]!.status).toBe('active')
+  expect(kv.map.has('drop:a:p1')).toBe(true)
+  expect((kv.map.get('s:a') as SessionRecord).plans[0]!.status).toBe('active')
+})
+
+test('loadAll: отметка на закрытый план его не меняет', async () => {
+  const kv = memory()
+  await saveRecord(kv, record('a', T0, 'done'))
+  await markDropped(kv, 'a', 'p1')
+  expect((await loadAll(kv))[0]!.plans[0]!.status).toBe('done')
 })
