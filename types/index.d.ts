@@ -42,9 +42,19 @@ export type Flags = {
   replanPending: boolean
 }
 
+/** The overview's status filter: unfinished, every plan, finished (done or abandoned). */
+export type StatusFilter = 'open' | 'all' | 'closed'
+
+/** The overview's period filter, by a plan's last change. */
+export type PeriodFilter = '7d' | '30d' | '6m' | 'all'
+
 /** What the pane shows and how the person left the overview. */
 export type PaneState = {
   view: 'chat' | 'all'
+  /** The search box: a piece of a goal or a step, any case. */
+  query: string
+  status: StatusFilter
+  period: PeriodFilter
   /** Folders opened (true) or closed (false) by hand, by project path. */
   folders: Record<string, boolean>
   /** The one plan shown in full, `sessionId:planId`. */

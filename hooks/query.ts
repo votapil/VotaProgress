@@ -1,6 +1,7 @@
 // What the «all projects» view shows: every session's plans, grouped by the
 // folder they were made in. Pure: no engine, no clock.
 
+import type { PeriodFilter, StatusFilter } from '../types'
 import type { Plan, SessionRecord } from './plan'
 
 /** Plans a folder shows before its «ещё 30». */
@@ -37,7 +38,50 @@ export type Scope = {
   current: string
   ownSession: string
   now: string
+  query: string
+  status: StatusFilter
+  period: PeriodFilter
 }
+
+export const STATUS_LABEL: Record<StatusFilter, string> = {
+  open: 'не закончено',
+  all: 'всё',
+  closed: 'закончено',
+}
+
+export const PERIOD_LABEL: Record<PeriodFilter, string> = {
+  '7d': '7 дн',
+  '30d': '30 дн',
+  '6m': '6 мес',
+  all: 'всё',
+}
+
+const STATUSES: StatusFilter[] = ['open', 'all', 'closed']
+const PERIODS: PeriodFilter[] = ['7d', '30d', '6m', 'all']
+const PERIOD_DAYS: Record<PeriodFilter, number> = { '7d': 7, '30d': 30, '6m': 182, all: Infinity }
+
+const after = <T>(list: T[], value: T): T => list[(list.indexOf(value) + 1) % list.length]!
+
+export const nextStatus = (status: StatusFilter): StatusFilter => after(STATUSES, status)
+
+export const nextPeriod = (period: PeriodFilter): PeriodFilter => after(PERIODS, period)
+
+const lower = (text: string): string => text.toLocaleLowerCase('ru')
+
+/** The search: a piece of the goal or of a step still in the plan, any case. */
+const matches = (plan: Plan, query: string): boolean => {
+  const wanted = lower(query.trim())
+
+  return (
+    wanted === '' ||
+    [plan.goal, ...plan.steps.filter(step => step.status !== 'dropped').map(step => step.text)].some(
+      text => lower(text).includes(wanted),
+    )
+  )
+}
+
+const passesStatus = (plan: Plan, status: StatusFilter): boolean =>
+  status === 'all' || (status === 'open') === (plan.status === 'active')
 
 /** The records with the session's own one, fresher than the store's, in its place. */
 export const withOwn = (records: SessionRecord[], own: SessionRecord | null): SessionRecord[] => {
@@ -75,11 +119,16 @@ const time = (iso: string): number => {
   return Number.isFinite(at) ? at : 0
 }
 
-/** The overview's folders: the current one first, the rest by their newest plan. */
+/**
+ * The overview's folders: the current one first, the rest by their newest
+ * plan; only plans the search and the filters let through, only folders
+ * left with any.
+ */
 export const folders = (records: SessionRecord[], scope: Scope): Folder[] => {
+  const since = time(scope.now) - PERIOD_DAYS[scope.period] * DAY
   const rows: Row[] = records.flatMap(record =>
     record.plans
-      .filter(plan => plan.status === 'active')
+      .filter(plan => time(plan.updatedAt) >= since && matches(plan, scope.query))
       .map(plan => ({
         key: record.sessionId + ':' + plan.id,
         sessionId: record.sessionId,
@@ -98,14 +147,19 @@ export const folders = (records: SessionRecord[], scope: Scope): Folder[] => {
   const names = folderNames([...byProject.keys()])
   const newest = (folder: Folder): number => time(folder.rows[0]?.plan.updatedAt ?? '')
 
+  // The count of unfinished plans stays whatever the status filter: it is
+  // what is left to do in the folder over that period.
   return [...byProject.entries()]
     .map(([project, list]) => ({
       project,
       name: names.get(project) ?? project,
       isCurrent: project === scope.current,
       unfinished: list.filter(row => row.plan.status === 'active').length,
-      rows: [...list].sort((a, b) => time(b.plan.updatedAt) - time(a.plan.updatedAt)),
+      rows: list
+        .filter(row => passesStatus(row.plan, scope.status))
+        .sort((a, b) => time(b.plan.updatedAt) - time(a.plan.updatedAt)),
     }))
+    .filter(folder => folder.rows.length > 0)
     .sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || newest(b) - newest(a))
 }
 

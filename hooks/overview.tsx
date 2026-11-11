@@ -7,7 +7,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 import type { PaneState } from '../types'
 import { clip, counts } from './plan'
 import type { Step } from './plan'
-import { PAGE, isStale, resumeCommand, rowNote, shortDate } from './query'
+import { PAGE, PERIOD_LABEL, STATUS_LABEL, isStale, resumeCommand, rowNote, shortDate } from './query'
 import type { Folder, Row } from './query'
 
 const HEAVY = '◆'
@@ -22,6 +22,10 @@ export type OverviewActions = {
   more(project: string): void
   copy(text: string, surface: RenderSurface): void
   drop(row: Row): void
+  search(text: string): void
+  status(): void
+  period(): void
+  reset(): void
 }
 
 export type OverviewView = {
@@ -33,11 +37,12 @@ export type OverviewView = {
   on: OverviewActions
 }
 
+/** A search opens every folder; otherwise a folder is as the person left it, the current one open. */
 export const isFolderOpen = (folder: Folder, state: PaneState): boolean =>
-  state.folders[folder.project] ?? folder.isCurrent
+  state.query.trim() !== '' || (state.folders[folder.project] ?? folder.isCurrent)
 
 export const renderOverview = <S extends RenderSurface>(table: ElementTable<S>, view: OverviewView) => {
-  const { Box, Button, Text } = table
+  const { Box, Button, Input, Text } = table
   const { state, on } = view
   const width = (text: string): number => [...text].length
   // The first unfinished plan of this folder holds the focus ring when the
@@ -151,8 +156,25 @@ export const renderOverview = <S extends RenderSurface>(table: ElementTable<S>, 
         <Button key="chat" plain hotkey="b" label="этот чат" onPress={() => on.chat()} />
         <Button key="refresh" plain hotkey="r" label="обновить" onPress={() => on.refresh()} />
       </Box>
+      <Input
+        key="q"
+        label="Поиск: "
+        value={state.query}
+        submitLabel="найти"
+        onInput={value => on.search(value)}
+        onSubmit={value => on.search(value)}
+      />
+      <Box flexDirection="row" gap={1}>
+        <Button key="status" label={'Статус: ' + STATUS_LABEL[state.status]} onPress={() => on.status()} />
+        <Button key="period" label={'Период: ' + PERIOD_LABEL[state.period]} onPress={() => on.period()} />
+      </Box>
       {view.folders === null && <Text dimColor>загрузка…</Text>}
-      {view.folders?.length === 0 && <Text dimColor>ничего не найдено</Text>}
+      {view.folders?.length === 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>ничего не найдено</Text>
+          <Button key="reset" label="сбросить фильтры" onPress={() => on.reset()} />
+        </Box>
+      )}
       {view.folders?.map(folderBlock)}
     </Box>
   )

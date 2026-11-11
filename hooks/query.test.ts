@@ -3,9 +3,13 @@ import { expect, test } from 'claude-code/testing'
 import type { Plan, SessionRecord } from './plan'
 import {
   PAGE,
+  PERIOD_LABEL,
+  STATUS_LABEL,
   folderNames,
   folders,
   isStale,
+  nextPeriod,
+  nextStatus,
   resumeCommand,
   rowNote,
   shortDate,
@@ -40,7 +44,14 @@ const RECORDS = [
   record('c', '/home/u/Notes', [one('p1', day('11-10'))]),
   record('d', '/home/u/Shop', [one('p1', day('11-05'))]),
 ]
-const SCOPE = { current: '/home/u/Demo', ownSession: 'a', now: NOW }
+const SCOPE = {
+  current: '/home/u/Demo',
+  ownSession: 'a',
+  now: NOW,
+  query: '',
+  status: 'open',
+  period: 'all',
+} as const
 
 test('folders: текущая папка первой, остальные по свежести незаконченных планов', () => {
   expect(folders(RECORDS, SCOPE).map(f => [f.name, f.isCurrent, f.unfinished])).toEqual([
@@ -127,4 +138,68 @@ test('rowNote: сделан, брошен, этот чат, чат закрыт,
 
 test('PAGE - 30', () => {
   expect(PAGE).toBe(30)
+})
+
+// ------------------------------------------------------------------ filters
+
+const ago = (days: number): string => new Date(Date.parse(NOW) - days * 24 * 60 * 60 * 1000).toISOString()
+
+const AGES = record('b', '/home/u/Shop', [
+  one('p1', ago(1)),
+  one('p2', ago(1), 'done'),
+  one('p3', ago(9)),
+  one('p4', ago(9), 'abandoned'),
+  one('p5', ago(40)),
+  one('p6', ago(40), 'done'),
+  one('p7', ago(200)),
+  one('p8', ago(200), 'done'),
+])
+
+const shown = (status: 'open' | 'all' | 'closed', period: '7d' | '30d' | '6m' | 'all'): string[] =>
+  folders([AGES], { ...SCOPE, status, period }).flatMap(f => f.rows.map(r => r.plan.id))
+
+test('статус × период', () => {
+  expect(shown('open', '7d')).toEqual(['p1'])
+  expect(shown('open', '30d')).toEqual(['p1', 'p3'])
+  expect(shown('open', '6m')).toEqual(['p1', 'p3', 'p5'])
+  expect(shown('open', 'all')).toEqual(['p1', 'p3', 'p5', 'p7'])
+  expect(shown('closed', '30d')).toEqual(['p2', 'p4'])
+  expect(shown('closed', 'all')).toEqual(['p2', 'p4', 'p6', 'p8'])
+  expect(shown('all', '7d')).toEqual(['p1', 'p2'])
+  expect(shown('all', 'all')).toHaveLength(8)
+})
+
+test('счётчик незаконченных - по поиску и периоду, без фильтра статуса', () => {
+  expect(folders([AGES], { ...SCOPE, status: 'closed', period: '30d' })[0]!.unfinished).toBe(2)
+})
+
+test('поиск по цели и шагам без учёта регистра', () => {
+  const records = [
+    record('b', '/home/u/Shop', [one('p1', ago(1), 'active', 'Оплата картой')]),
+    record('c', '/home/u/Notes', [
+      { ...one('p1', ago(2), 'active', 'Заметки'), steps: [{ id: '1', text: 'форма оплаты', weight: 1, status: 'active' }] },
+      one('p2', ago(3), 'active', 'Другое'),
+    ]),
+  ]
+  const found = (query: string) =>
+    folders(records, { ...SCOPE, query }).flatMap(f => f.rows.map(r => r.key))
+  expect(found('ОПЛАТ')).toEqual(['b:p1', 'c:p1'])
+  expect(found('  оплат ')).toEqual(['b:p1', 'c:p1'])
+  expect(found('нет такого')).toEqual([])
+})
+
+test('выброшенный шаг поиском не находится', () => {
+  const records = [
+    record('b', '/home/u/Shop', [
+      { ...one('p1', ago(1)), steps: [{ id: '1', text: 'тайный шаг', weight: 1, status: 'dropped' }, { id: '2', text: 'а', weight: 1, status: 'active' }] },
+    ]),
+  ]
+  expect(folders(records, { ...SCOPE, query: 'тайный' })).toEqual([])
+})
+
+test('кнопки-циклы и их подписи', () => {
+  expect([nextStatus('open'), nextStatus('all'), nextStatus('closed')]).toEqual(['all', 'closed', 'open'])
+  expect([nextPeriod('7d'), nextPeriod('30d'), nextPeriod('6m'), nextPeriod('all')]).toEqual(['30d', '6m', 'all', '7d'])
+  expect(STATUS_LABEL).toEqual({ open: 'не закончено', all: 'всё', closed: 'закончено' })
+  expect(PERIOD_LABEL).toEqual({ '7d': '7 дн', '30d': '30 дн', '6m': '6 мес', all: 'всё' })
 })

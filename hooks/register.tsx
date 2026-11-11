@@ -12,7 +12,7 @@ import type { OverviewActions } from './overview'
 import { PANE, PANE_TITLE, projectOf, renderChat } from './pane'
 import { activePlan, autoCloseOutcome, closePlan, projectName, statusLine } from './plan'
 import type { SessionRecord } from './plan'
-import { PAGE, folders, withOwn } from './query'
+import { PAGE, folders, nextPeriod, nextStatus, withOwn } from './query'
 import type { Row } from './query'
 import { NUDGE, RULE, replanText } from './rule'
 import {
@@ -41,8 +41,17 @@ const flags = atom({ plugin: 'votaprogress', key: 'flags' } as const, {
 
 const pane = atom(
   { plugin: 'votaprogress', key: 'pane' } as const,
-  { view: 'chat', folders: {}, openPlan: null, more: {}, rev: 0 },
-  { shape: 'pane-2' },
+  {
+    view: 'chat',
+    query: '',
+    status: 'open',
+    period: '30d',
+    folders: {},
+    openPlan: null,
+    more: {},
+    rev: 0,
+  },
+  { shape: 'pane-3' },
 )
 
 // A third of a 144-column terminal, the narrowest one a pane opens in unasked.
@@ -226,6 +235,24 @@ const overviewActions = ($: $): OverviewActions => ({
         await update($, pane, held => ({ ...held, openPlan: null }))
         await reload($)
       })(),
+    ),
+  // A new search or filter starts the list over: no plan open, first pages only.
+  search: text =>
+    quietly(update($, pane, held => (held.query === text ? held : { ...held, query: text, openPlan: null, more: {} }))),
+  status: () =>
+    quietly(update($, pane, held => ({ ...held, status: nextStatus(held.status), openPlan: null, more: {} }))),
+  period: () =>
+    quietly(update($, pane, held => ({ ...held, period: nextPeriod(held.period), openPlan: null, more: {} }))),
+  reset: () =>
+    quietly(
+      update($, pane, held => ({
+        ...held,
+        query: '',
+        status: 'open' as const,
+        period: '30d' as const,
+        openPlan: null,
+        more: {},
+      })),
     ),
 })
 
@@ -451,6 +478,9 @@ export const register: Register = on => {
                 current: record?.project ?? root,
                 ownSession: record?.sessionId ?? '',
                 now,
+                query: state.query,
+                status: state.status,
+                period: state.period,
               }),
         state,
         columns: e.props.bodyColumns,
