@@ -8,7 +8,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { PANE, PANE_TITLE, projectOf, renderChat } from './pane'
-import { activePlan, closePlan, projectName, shouldAutoClose, statusLine } from './plan'
+import { activePlan, autoCloseOutcome, closePlan, projectName, statusLine } from './plan'
 import type { SessionRecord } from './plan'
 import { NUDGE, RULE, replanText } from './rule'
 import {
@@ -32,8 +32,6 @@ const flags = atom({ plugin: 'votaprogress', key: 'flags' } as const, {
   storeFailed: false,
   replanPending: false,
 })
-
-const pane = atom({ plugin: 'votaprogress', key: 'pane' } as const, { isWaiting: false })
 
 // A third of a 144-column terminal, the narrowest one a pane opens in unasked.
 // The engine caps it at 45% and a width the person set by hand wins.
@@ -105,13 +103,10 @@ export const commit = async ($: $, record: SessionRecord): Promise<void> => {
  */
 export const refreshStatus = async ($: $): Promise<void> => {
   const isPlaced = (await $.ui.panes()).some(one => one.id === PANE && one.isPlaced)
-  const { isWaiting } = await read($, pane)
   const { record } = await read($, session)
   const plan = record ? activePlan(record) : undefined
 
-  $.ui.status(
-    isPlaced || !record ? undefined : statusLine(projectName(record.project), plan, isWaiting),
-  )
+  $.ui.status(isPlaced || !record ? undefined : statusLine(projectName(record.project), plan))
 }
 
 const openPane = async ($: $): Promise<boolean> => {
@@ -119,14 +114,6 @@ const openPane = async ($: $): Promise<boolean> => {
   await refreshStatus($)
 
   return opened.isPlaced
-}
-
-const setWaiting = async ($: $, isWaiting: boolean): Promise<void> => {
-  if ((await read($, pane)).isWaiting !== isWaiting) {
-    await update($, pane, held => ({ ...held, isWaiting }))
-  }
-
-  await refreshStatus($)
 }
 
 const OWN = 'mcp__votaprogress__progress'
@@ -209,7 +196,7 @@ export const register: Register = on => {
     edits = 0
     isNudged = false
     await ensureSession($)
-    await setWaiting($, false)
+    await refreshStatus($)
     const replan = await takeReplan($)
 
     return next(replan === undefined ? e : { ...e, context: [...(e.context ?? []), replan] })
@@ -258,9 +245,10 @@ export const register: Register = on => {
     if (e.agentId === undefined && e.reason === 'answer') {
       const record = await ensureSession($)
       const plan = activePlan(record)
+      const outcome = plan && autoCloseOutcome(plan)
 
-      if (plan && shouldAutoClose(plan)) {
-        const closed = closePlan(plan, 'done', await nowIso($)).plan
+      if (plan && outcome) {
+        const closed = closePlan(plan, outcome, await nowIso($)).plan
         await commit($, {
           ...record,
           plans: record.plans.map(one => (one.id === closed.id ? closed : one)),
@@ -269,7 +257,7 @@ export const register: Register = on => {
     }
 
     if (e.agentId === undefined) {
-      await setWaiting($, true)
+      await refreshStatus($)
     }
 
     return next(e)
@@ -277,7 +265,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      await setWaiting($, false)
+      await refreshStatus($)
     }
 
     return next(e)
@@ -307,7 +295,6 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: 'votaprogress' }, async ($, e) => {
     const { record } = await read($, session)
-    const { isWaiting } = await read($, pane)
     const { storeFailed } = await read($, flags)
 
     return renderChat($.ui.resolve(e), {
@@ -315,7 +302,6 @@ export const register: Register = on => {
       project: projectOf(record, await $.session.root()),
       rows: e.props.scroll.bodyRows,
       columns: e.props.bodyColumns,
-      isWaiting,
       storeFailed,
     })
   })

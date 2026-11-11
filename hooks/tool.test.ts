@@ -20,6 +20,27 @@ test('схема: action обязателен, три действия', () => {
   expect(schema.properties.action.enum).toEqual(['start', 'update', 'close'])
 })
 
+test('схема: у шага флажок big, веса нет', () => {
+  type Step = { properties: Record<string, { type: string }> }
+  const schema = toolSpec.inputSchema as {
+    properties: { steps: { items: Step }; add: { items: Step } }
+  }
+
+  for (const step of [schema.properties.steps.items, schema.properties.add.items]) {
+    expect(step.properties.big?.type).toBe('boolean')
+    expect('weight' in step.properties).toBe(false)
+  }
+})
+
+test('описание говорит, что субагенты план не ведут', () => {
+  expect(toolSpec.description).toContain('Субагенты план не ведут: его ведёт основная сессия.')
+})
+
+test('start: big в шаге - крупный шаг', () => {
+  const out = handle(EMPTY, { ...START, steps: [{ text: 'а', big: true }, { text: 'б' }] }, T0)
+  expect(out.record.plans[0]!.steps.map(s => s.weight)).toEqual([3, 1])
+})
+
 test('start: план заведён', () => {
   const out = handle(EMPTY, START, T0)
   expect(out.isError).toBe(false)

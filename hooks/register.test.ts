@@ -212,6 +212,16 @@ test('шаги добавлены после 100% в том же ходу: ав�
   expect(statusOf(w)).toBe('active')
 })
 
+test('turn.complete answer: все шаги выброшены - план закрыт как abandoned', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  await call($, { tool: TOOL_FULL, action: 'update', drop: ['1', '2'] })
+  expect(statusOf(w)).toBe('active')
+  await turnEnd($, 'answer')
+  expect(statusOf(w)).toBe('abandoned')
+})
+
 test('turn.complete субагента ничего не закрывает', async ($, on) => {
   const w = world(on)
   await $.session.start(boot)

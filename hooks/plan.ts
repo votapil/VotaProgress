@@ -11,21 +11,6 @@ export const cleanText = (text: string): string =>
 
 const live = (plan: Plan): Step[] => plan.steps.filter(step => step.status !== 'dropped')
 
-export const percent = (plan: Plan): number | null => {
-  const steps = live(plan)
-
-  if (plan.finish === undefined || steps.length === 0) {
-    return null
-  }
-
-  const total = steps.reduce((sum, step) => sum + step.weight, 0)
-  const done = steps
-    .filter(step => step.status === 'done')
-    .reduce((sum, step) => sum + step.weight, 0)
-
-  return Math.round((100 * done) / total)
-}
-
 export const counts = (plan: Plan): { done: number; total: number } => {
   const steps = live(plan)
 
@@ -68,16 +53,22 @@ export const compact = (plan: Plan): string => {
 /** A refusal the model can act on: its message is shown to the model as is. */
 export class PlanError extends Error {}
 
+/** A plan as an older record may hold it: stage 1 kept a percent it no longer reads. */
+type Legacy = Plan & { lastChange?: unknown }
+
+/** A step as the model sends it: `big` marks a heavy one; `weight` is what older threads send. */
+export type StepInput = { text: string; big?: boolean; weight?: unknown }
+
 export type StartInput = {
   goal: string
   finish?: string
-  steps: { text: string; weight?: number }[]
+  steps: StepInput[]
 }
 
 export type UpdateInput = {
   done?: string[]
   active?: string
-  add?: { text: string; weight?: number; after?: string }[]
+  add?: (StepInput & { after?: string })[]
   drop?: string[]
   finish?: string
   goal?: string
@@ -85,17 +76,10 @@ export type UpdateInput = {
 
 const MAX_STEPS = 30
 
-const weightOf = (weight: number | undefined): 1 | 2 | 3 => {
-  if (weight === undefined) {
-    return 1
-  }
-
-  if (weight !== 1 && weight !== 2 && weight !== 3) {
-    throw new PlanError(`Вес шага - 1, 2 или 3, а пришло ${String(weight)}.`)
-  }
-
-  return weight
-}
+// A heavy step is kept as weight 3, the mark older records carry. A weight
+// from a thread that saw the old schema is read, never refused.
+const weightOf = (step: StepInput | undefined): 1 | 3 =>
+  step?.big === true || step?.weight === 3 ? 3 : 1
 
 const textOf = (text: unknown): string => {
   const clean = typeof text === 'string' ? cleanText(text) : ''
@@ -135,7 +119,7 @@ export const closePlan = (
 
           return step
         })
-  const { lastChange: _lastChange, ...rest } = plan
+  const { lastChange: _lastChange, ...rest } = plan as Legacy
 
   return { plan: { ...rest, steps, status: outcome, closedAt: now, updatedAt: now }, dropped }
 }
@@ -159,7 +143,7 @@ export const startPlan = (
     (step, index): Step => ({
       id: String(index + 1),
       text: textOf(step?.text),
-      weight: weightOf(step?.weight),
+      weight: weightOf(step),
       status: index === 0 ? 'active' : 'pending',
     }),
   )
@@ -204,14 +188,13 @@ export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan =>
 
     return found
   }
-  const before = percent(plan)
   const added = input.add ?? []
 
   for (const one of added) {
     const created: Step = {
       id: String(Math.max(0, ...steps.map(step => Number(step.id))) + 1),
       text: textOf(one?.text),
-      weight: weightOf(one?.weight),
+      weight: weightOf(one),
       status: 'pending',
     }
 
@@ -271,7 +254,7 @@ export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan =>
     throw new PlanError('У плана пустая цель (goal).')
   }
 
-  const { lastChange: _lastChange, finish: oldFinish, ...rest } = plan
+  const { lastChange: _lastChange, finish: oldFinish, ...rest } = plan as Legacy
   const finish = input.finish === undefined ? oldFinish : cleanText(String(input.finish))
 
   return {
@@ -280,12 +263,24 @@ export const updatePlan = (plan: Plan, input: UpdateInput, now: string): Plan =>
     ...(finish === undefined || finish === '' ? {} : { finish }),
     steps,
     updatedAt: now,
-    ...(added.length > 0 ? { lastChange: { added: added.length, percentBefore: before ?? 0 } } : {}),
   }
 }
 
-export const shouldAutoClose = (plan: Plan): boolean =>
-  plan.status === 'active' && plan.finish !== undefined && allLiveDone(plan)
+/**
+ * How the mod closes a plan by itself once the turn ends: `done` when a plan
+ * with a finish has every live step done, `abandoned` when no live step is left.
+ */
+export const autoCloseOutcome = (plan: Plan): 'done' | 'abandoned' | undefined => {
+  if (plan.status !== 'active') {
+    return undefined
+  }
+
+  if (live(plan).length === 0) {
+    return 'abandoned'
+  }
+
+  return plan.finish !== undefined && allLiveDone(plan) ? 'done' : undefined
+}
 
 // ------------------------------------------------------------------- display
 
@@ -344,11 +339,7 @@ export const clip = (text: string, max: number): string => {
 }
 
 /** One line under the prompt: project, goal, steps done of all, the step in hand. */
-export const statusLine = (
-  project: string,
-  plan: Plan | undefined,
-  isWaiting: boolean,
-): string | undefined => {
+export const statusLine = (project: string, plan: Plan | undefined): string | undefined => {
   if (!plan) {
     return undefined
   }
@@ -360,6 +351,6 @@ export const statusLine = (
     project,
     clip(plan.goal, 40),
     done + '/' + total,
-    ...(current ? [(isWaiting ? 'ждёт ответа: ' : 'сейчас: ') + clip(current.text, 40)] : []),
+    ...(current ? ['сейчас: ' + clip(current.text, 40)] : []),
   ].join(' · ')
 }

@@ -1,22 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cleanText, compact, counts, percent } from './plan'
+import { cleanText, compact, counts } from './plan'
 import { plan, step } from './testkit'
-
-test('percent считает по весам', () => {
-  expect(
-    percent(plan([step('1', 1, 'done'), step('2', 3, 'active'), step('3', 1, 'pending')])),
-  ).toBe(20)
-})
-
-test('percent не учитывает dropped', () => {
-  expect(percent(plan([step('1', 1, 'done'), step('2', 3, 'dropped')]))).toBe(100)
-})
-
-test('percent null при открытом финале и без шагов', () => {
-  expect(percent(plan([step('1', 1, 'done')], null))).toBe(null)
-  expect(percent(plan([step('1', 1, 'dropped')]))).toBe(null)
-})
 
 test('counts без dropped', () => {
   expect(

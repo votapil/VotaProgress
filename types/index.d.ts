@@ -19,7 +19,6 @@ export type Plan = {
   createdAt: string
   updatedAt: string
   closedAt?: string
-  lastChange?: { added: number; percentBefore: number }
 }
 
 export type SessionRecord = {
@@ -41,17 +40,11 @@ export type Flags = {
   replanPending: boolean
 }
 
-export type PaneState = {
-  /** The turn ended and the next prompt has not come: the step waits on the person. */
-  isWaiting: boolean
-}
-
 declare module 'claude-code' {
   interface PluginState {
     votaprogress: {
       session: Shaped<SessionState>
       flags: Flags
-      pane: PaneState
     }
   }
 }

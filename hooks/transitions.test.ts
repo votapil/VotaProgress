@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { PlanError, closePlan, percent, shouldAutoClose, startPlan, updatePlan } from './plan'
+import { PlanError, autoCloseOutcome, closePlan, counts, startPlan, updatePlan } from './plan'
 import { EMPTY, T0, T1, T2, fails, plan, step } from './testkit'
 
 const THREE = plan([step('1', 1, 'active'), step('2', 1, 'pending'), step('3', 1, 'pending')], null)
@@ -25,7 +25,7 @@ const throwsPlanError = (run: () => unknown): boolean => {
 test('start: первый шаг активен, id p1', () => {
   const { record, closed } = startPlan(
     EMPTY,
-    { goal: 'Мод', finish: 'проверен', steps: [{ text: 'а' }, { text: 'б', weight: 3 }] },
+    { goal: 'Мод', finish: 'проверен', steps: [{ text: 'а' }, { text: 'б', big: true }] },
     T0,
   )
   expect(closed).toBe(undefined)
@@ -72,11 +72,17 @@ test('start чистит тексты цели и шагов', () => {
   expect(record.plans[0]!.steps[0]!.text).toBe('а б')
 })
 
-test('start: пустые шаги, вес 5, пустая цель, 31 шаг - ошибки', () => {
+test('start: старое поле weight - 3 крупный, остальное обычный, без ошибки', () => {
+  const { record } = startPlan(
+    EMPTY,
+    { goal: 'x', steps: [{ text: 'а', weight: 3 }, { text: 'б', weight: 5 }, { text: 'в', weight: 2 }] },
+    T0,
+  )
+  expect(record.plans[0]!.steps.map(s => s.weight)).toEqual([3, 1, 1])
+})
+
+test('start: пустые шаги, пустая цель, 31 шаг - ошибки', () => {
   expect(throwsPlanError(() => startPlan(EMPTY, { goal: 'x', steps: [] }, T0))).toBe(true)
-  expect(
-    throwsPlanError(() => startPlan(EMPTY, { goal: 'x', steps: [{ text: 'а', weight: 5 }] }, T0)),
-  ).toBe(true)
   expect(throwsPlanError(() => startPlan(EMPTY, { goal: '  ', steps: [{ text: 'а' }] }, T0))).toBe(
     true,
   )
@@ -100,7 +106,7 @@ test('update: явный active снимает прежний активный �
 })
 
 test('update add: новый шаг встаёт после after и получает следующий номер', () => {
-  const p = updatePlan(THREE, { add: [{ text: 'новый', after: '1' }, { text: 'в конец', weight: 2 }] }, T1)
+  const p = updatePlan(THREE, { add: [{ text: 'новый', after: '1' }, { text: 'в конец', big: true }] }, T1)
   expect(p.steps.map(s => [s.id, s.text])).toEqual([
     ['1', 'шаг 1'],
     ['4', 'новый'],
@@ -108,7 +114,7 @@ test('update add: новый шаг встаёт после after и получ�
     ['3', 'шаг 3'],
     ['5', 'в конец'],
   ])
-  expect(p.steps[4]!.weight).toBe(2)
+  expect(p.steps.map(s => s.weight)).toEqual([1, 1, 1, 1, 3])
 })
 
 test('update drop: шаг становится dropped, номера не переиспользуются', () => {
@@ -117,18 +123,17 @@ test('update drop: шаг становится dropped, номера не пер
   expect(updatePlan(dropped, { add: [{ text: 'ещё' }] }, T2).steps[3]!.id).toBe('4')
 })
 
-test('update add после 100% роняет процент и пишет lastChange', () => {
+test('update add после всех сделанных: счёт растёт, автозакрытия нет, lastChange не пишется', () => {
   const full = updatePlan(updatePlan(TWO, { done: ['1'] }, T1), { done: ['2'] }, T1)
-  expect(percent(full)).toBe(100)
   const p = updatePlan(full, { add: [{ text: 'ещё' }, { text: 'и ещё' }] }, T2)
-  expect(percent(p)).toBe(50)
-  expect(p.lastChange).toEqual({ added: 2, percentBefore: 100 })
-  expect(shouldAutoClose(p)).toBe(false)
+  expect(counts(p)).toEqual({ done: 2, total: 4 })
+  expect('lastChange' in p).toBe(false)
+  expect(autoCloseOutcome(p)).toBe(undefined)
 })
 
-test('update без add стирает lastChange', () => {
-  const added = updatePlan(TWO, { add: [{ text: 'ещё' }] }, T1)
-  expect(updatePlan(added, { done: ['1'] }, T2).lastChange).toBe(undefined)
+test('update снимает lastChange, оставшийся в старой записи', () => {
+  const old = { ...TWO, lastChange: { added: 1, percentBefore: 50 } }
+  expect('lastChange' in updatePlan(old, { done: ['1'] }, T2)).toBe(false)
 })
 
 test('update с неизвестным номером бросает PlanError и не меняет план', () => {
@@ -143,8 +148,9 @@ test('update: один шаг в done и drop - ошибка', () => {
   expect(throwsPlanError(() => updatePlan(THREE, { done: ['2'], drop: ['2'] }, T1))).toBe(true)
 })
 
-test('update: вес нового шага вне 1-3 - ошибка', () => {
-  expect(throwsPlanError(() => updatePlan(THREE, { add: [{ text: 'x', weight: 0 }] }, T1))).toBe(true)
+test('update add: старое поле weight без ошибки, 3 - крупный', () => {
+  const p = updatePlan(THREE, { add: [{ text: 'x', weight: 0 }, { text: 'y', weight: 3 }] }, T1)
+  expect(p.steps.slice(3).map(s => s.weight)).toEqual([1, 3])
 })
 
 test('update finish: задаёт критерий, пустая строка открывает финал', () => {
@@ -152,11 +158,11 @@ test('update finish: задаёт критерий, пустая строка о
   expect('finish' in updatePlan(THREE_WITH_FINISH, { finish: ' ' }, T1)).toBe(false)
 })
 
-test('close done: активный done, pending dropped, процент 100', () => {
+test('close done: активный done, pending dropped, счёт N из N', () => {
   const { plan: closed, dropped } = closePlan(THREE_WITH_FINISH, 'done', T2)
   expect(closed.steps.map(s => s.status)).toEqual(['done', 'dropped', 'dropped'])
   expect(dropped).toEqual(['шаг 2', 'шаг 3'])
-  expect(percent(closed)).toBe(100)
+  expect(counts(closed)).toEqual({ done: 1, total: 1 })
   expect(closed).toMatchObject({ status: 'done', closedAt: T2, updatedAt: T2 })
 })
 
@@ -167,14 +173,23 @@ test('close abandoned: шаги не меняются', () => {
   expect(closed.status).toBe('abandoned')
 })
 
-test('shouldAutoClose: true, когда финал задан и все шаги сделаны', () => {
+test('autoCloseOutcome: done, когда финал задан и все шаги сделаны', () => {
   const full = updatePlan(updatePlan(TWO, { done: ['1'] }, T1), { done: ['2'] }, T1)
-  expect(shouldAutoClose(full)).toBe(true)
+  expect(autoCloseOutcome(full)).toBe('done')
 })
 
-test('shouldAutoClose: false при открытом финале и при несделанных шагах', () => {
-  expect(shouldAutoClose(ALL_DONE_OPEN)).toBe(false)
-  expect(shouldAutoClose(TWO)).toBe(false)
+test('autoCloseOutcome: нет при открытом финале и при несделанных шагах', () => {
+  expect(autoCloseOutcome(ALL_DONE_OPEN)).toBe(undefined)
+  expect(autoCloseOutcome(TWO)).toBe(undefined)
+})
+
+test('autoCloseOutcome: все шаги выброшены - abandoned, с финалом и без', () => {
+  expect(autoCloseOutcome(plan([step('1', 1, 'dropped'), step('2', 1, 'dropped')]))).toBe('abandoned')
+  expect(autoCloseOutcome(plan([step('1', 1, 'dropped')], null))).toBe('abandoned')
+})
+
+test('autoCloseOutcome: закрытый план не закрывается снова', () => {
+  expect(autoCloseOutcome({ ...plan([step('1', 1, 'dropped')]), status: 'abandoned' })).toBe(undefined)
 })
 
 test('update goal: переименовывает цель, пустая - ошибка', () => {

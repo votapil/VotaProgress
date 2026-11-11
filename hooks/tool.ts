@@ -13,7 +13,7 @@ const STEP = {
   type: 'object',
   properties: {
     text: { type: 'string', description: 'Шаг одной короткой фразой.' },
-    weight: { type: 'integer', enum: [1, 2, 3], description: '1 мелкий (по умолчанию), 2 обычный, 3 крупный.' },
+    big: { type: 'boolean', description: 'true - крупный шаг, помечается значком.' },
   },
   required: ['text'],
 }
@@ -26,6 +26,7 @@ export const toolSpec: ToolSpec = {
     'update - изменить план: done (номера сделанных шагов; следующий шаг активируется сам), active (сделать шаг активным вне порядка), add (новые шаги, after - после какого номера), drop (убрать шаги), finish (новый критерий конца), goal (переименовать цель).',
     'close - закрыть план: outcome done или abandoned. План с критерием конца закрывается сам, когда все шаги сделаны и ход закончен.',
     'Закрыл шаг - один вызов update. Ответ всегда содержит план с номерами шагов.',
+    'Субагенты план не ведут: его ведёт основная сессия.',
   ].join('\n'),
   inputSchema: {
     type: 'object',

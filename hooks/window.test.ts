@@ -51,30 +51,28 @@ test('windowSteps: dropped не показываются', () => {
 })
 
 test('statusLine: обычный план', () => {
-  expect(statusLine('Demo', P45, false)).toBe(
+  expect(statusLine('Demo', P45)).toBe(
     'Demo · Мод progress · 3/7 · сейчас: тесты',
   )
 })
 
-test('statusLine: открытый финал и ожидание ответа', () => {
-  expect(statusLine('Demo', OPEN4, true)).toBe(
-    'Demo · Разбор · 4/5 · ждёт ответа: пачка',
-  )
+test('statusLine: открытый финал, всегда «сейчас»', () => {
+  expect(statusLine('Demo', OPEN4)).toBe('Demo · Разбор · 4/5 · сейчас: пачка')
 })
 
 test('statusLine: нет плана', () => {
-  expect(statusLine('Demo', undefined, false)).toBe(undefined)
+  expect(statusLine('Demo', undefined)).toBe(undefined)
 })
 
 test('statusLine: длинные тексты режутся до 40 знаков, строка одна', () => {
-  const line = statusLine('Demo', LONG_GOAL, false) ?? ''
+  const line = statusLine('Demo', LONG_GOAL) ?? ''
   expect(line.includes('\n')).toBe(false)
   expect(line).toBe('Demo · ' + 'ц'.repeat(39) + '… · 0/1 · сейчас: ' + 'ш'.repeat(39) + '…')
 })
 
 test('statusLine: без активного шага хвоста нет', () => {
   const p = plan([step('1', 1, 'done')])
-  expect(statusLine('Demo', p, false)).toBe('Demo · Мод progress · 1/1')
+  expect(statusLine('Demo', p)).toBe('Demo · Мод progress · 1/1')
 })
 
 test('projectName берёт последнюю часть пути', () => {

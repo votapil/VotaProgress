@@ -23,7 +23,7 @@ const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
 test('панель показывает проект, цель, счёт шагов и активный шаг, на каждой поверхности', async ($, on) => {
   world(on)
   await $.session.start(boot)
-  await call($, { ...START, steps: [{ text: 'а' }, { text: 'б' }, { text: 'в', weight: 3 }] })
+  await call($, { ...START, steps: [{ text: 'а' }, { text: 'б' }, { text: 'в', big: true }] })
   await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
 
   for (const surface of SURFACES) {
@@ -174,30 +174,28 @@ test('панель нарисована: строки статуса нет', as
   expect(w.statuses.at(-1)).toBe(undefined)
 })
 
-test('после конца хода статус и панель пишут «ждёт ответа», после нового сообщения снова «сейчас»', async ($, on) => {
+test('после конца хода «ждёт ответа» нет ни в строке, ни в панели', async ($, on) => {
   const w = world(on)
   w.isPlaced = false
   await $.session.start(boot)
   await call($, START)
   await raise($).turn.complete({ answer: 'ок', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · ждёт ответа: а')
-  const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^ждёт ответа$/ })).toBeDefined()
-  await ui.unmount()
-  await raise($).prompt.submit({ text: 'дальше' })
   expect(w.statuses.at(-1)).toBe('Demo · Мод · 0/2 · сейчас: а')
+  const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /ждёт ответа/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /^◐/ }))?.text).toBe('◐ а')
+  await ui.unmount()
 })
 
-test('длинный шаг обрезается так, чтобы пометка справа поместилась в одну строку', async ($, on) => {
+test('длинный крупный шаг обрезается так, чтобы ◆ справа поместился в одну строку', async ($, on) => {
   world(on)
   await $.session.start(boot)
-  await call($, { ...START, steps: [{ text: 'Закрыть панель, строка статуса, /progress и ещё' }, { text: 'б' }] })
-  await raise($).turn.complete({ answer: 'ок', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await call($, { ...START, steps: [{ text: 'Закрыть панель, строка статуса, /progress и ещё', big: true }, { text: 'б' }] })
   const ui = await $.ui.mount({ ...pane(), surface: 'terminal' })
   const left = (await ui.find({ type: 'Text', text: /^◐/ }))?.text ?? ''
-  // 40 columns: the text, one space, then «ждёт ответа» (11 characters).
-  expect(left).toBe('◐ Закрыть панель, строка ст…')
-  expect([...left].length).toBe(40 - 11 - 1)
+  // 40 columns: the text, one space, then ◆.
+  expect(left).toBe('◐ Закрыть панель, строка статуса, /pr…')
+  expect([...left].length).toBe(40 - 1 - 1)
   await ui.unmount()
 })
 

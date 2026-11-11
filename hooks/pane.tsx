@@ -3,7 +3,7 @@
 
 import type { ElementTable, RenderSurface } from 'claude-code'
 
-import { activePlan, activeStep, clip, counts, projectName, windowSteps } from './plan'
+import { activePlan, clip, counts, projectName, windowSteps } from './plan'
 import type { Plan, SessionRecord, Step } from './plan'
 
 export const PANE = 'votaprogress'
@@ -19,7 +19,6 @@ export type ChatView = {
   /** Rows and columns the pane's body has. */
   rows: number
   columns: number
-  isWaiting: boolean
   storeFailed: boolean
 }
 
@@ -30,7 +29,6 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
     .filter(one => one.status !== 'active')
     .slice(-HISTORY)
     .reverse()
-  const current = plan ? activeStep(plan) : undefined
   // Steps done of all, never a percent: a plan grows as the work goes, and a
   // percent that falls back reads as lost progress.
   const tally = plan ? counts(plan) : { done: 0, total: 0 }
@@ -56,13 +54,8 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
   const stepRow = (step: Step) =>
     row(
       (step.status === 'done' ? '✓ ' : step.status === 'active' ? '◐ ' : '○ ') + step.text,
-      // The circle already says which step is in hand; the tag is for what it
-      // cannot say: the step waits on the person, or it is a heavy one.
-      step.id === current?.id && view.isWaiting
-        ? 'ждёт ответа'
-        : step.weight === 3 && step.status !== 'done'
-          ? HEAVY
-          : undefined,
+      // The circle says which step is in hand; the one tag is for a heavy step.
+      step.weight === 3 && step.status !== 'done' ? HEAVY : undefined,
       step.status !== 'active',
     )
   const earlierRow = (one: Plan) =>
