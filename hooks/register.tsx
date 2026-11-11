@@ -17,6 +17,7 @@ import type { Row } from './query'
 import { NUDGE, RULE, replanText } from './rule'
 import {
   applyDrops,
+  clearMarks,
   emptyRecord,
   getPaneClosed,
   loadAll,
@@ -96,10 +97,11 @@ const raise = async ($: $, id: string): Promise<SessionRecord> => {
     return emptyRecord(id, await $.session.root())
   }
 
-  const record = await applyDrops(kv($), stored, await nowIso($))
+  const { record, marks } = await applyDrops(kv($), stored, await nowIso($))
 
-  if (record !== stored) {
-    await saveRecord(kv($), record)
+  // A mark goes once the record it closed is kept.
+  if (marks.length > 0 && (record === stored || (await saveRecord(kv($), record)))) {
+    await clearMarks(kv($), marks)
   }
 
   return record
@@ -112,15 +114,25 @@ export const ensureSession = async ($: $): Promise<SessionRecord> => {
 
   if (held.owner === id && held.record) {
     // A plan dropped from another session's overview closes before the next
-    // write; a store that cannot be read leaves the record as it is.
-    const marked = await (async () =>
-      applyDrops(kv($), held.record!, await nowIso($)))().catch(() => held.record!)
+    // write; a store that cannot be read leaves the record as it is. The
+    // record is written again whatever the mark changed, so a write that
+    // failed before is retried, and the mark goes once the write took.
+    const record = held.record
+    const applied = await (async () => applyDrops(kv($), record, await nowIso($)))().catch(
+      () => undefined,
+    )
 
-    if (marked !== held.record) {
-      await commit($, marked)
+    if (!applied || applied.marks.length === 0) {
+      return record
     }
 
-    return marked
+    await commit($, applied.record)
+
+    if (!(await read($, flags)).storeFailed) {
+      await clearMarks(kv($), applied.marks).catch(() => undefined)
+    }
+
+    return applied.record
   }
 
   // A store that cannot be read costs the history, not the tool: the session
@@ -175,8 +187,9 @@ const reload = async ($: $): Promise<void> => {
   await update($, pane, held => ({ ...held, rev: held.rev + 1 }))
 }
 
+/** The overview, as it opens each time: the current folder open, the rest closed. */
 const showAll = async ($: $): Promise<void> => {
-  await update($, pane, held => ({ ...held, view: 'all' as const }))
+  await update($, pane, held => ({ ...held, view: 'all' as const, folders: {} }))
   await reload($)
 }
 
@@ -289,7 +302,8 @@ export const register: Register = on => {
       argumentHint: '[all]',
     })
     await ensureSession($)
-    await prune(kv($), await nowIso($))
+    // Pruning is housekeeping: a store that refuses it costs nothing else.
+    await (async () => prune(kv($), await nowIso($)))().catch(() => 0)
     await refreshStatus($)
 
     // After a reload of the module the overview has no read of the store yet.

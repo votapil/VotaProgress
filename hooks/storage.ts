@@ -33,6 +33,8 @@ const isText = (value: unknown): value is string => typeof value === 'string'
 
 const isMaybeText = (value: unknown): boolean => value === undefined || isText(value)
 
+const isDate = (value: unknown): value is string => isText(value) && Number.isFinite(Date.parse(value))
+
 const STEP_STATUS = new Set(['pending', 'active', 'done', 'dropped'])
 const PLAN_STATUS = new Set(['active', 'done', 'abandoned'])
 
@@ -49,7 +51,7 @@ export const asPlan = (value: unknown): Plan | undefined =>
   isText(value.id) &&
   isText(value.goal) &&
   isText(value.createdAt) &&
-  isText(value.updatedAt) &&
+  isDate(value.updatedAt) &&
   isMaybeText(value.finish) &&
   isMaybeText(value.closedAt) &&
   PLAN_STATUS.has(value.status as string) &&
@@ -58,7 +60,8 @@ export const asPlan = (value: unknown): Plan | undefined =>
     ? (value as Plan)
     : undefined
 
-// A broken plan costs itself alone: the record keeps the plans that read.
+// A broken plan costs itself alone: the record keeps the plans that read, and
+// the rest ride along in `unread` to be written back untouched.
 const asRecord = (value: unknown, sessionId?: string): SessionRecord | undefined => {
   if (!isObject(value)) {
     return undefined
@@ -77,9 +80,28 @@ const asRecord = (value: unknown, sessionId?: string): SessionRecord | undefined
     return undefined
   }
 
-  const plans = value.plans.map(asPlan).filter((plan): plan is Plan => plan !== undefined)
+  const plans: Plan[] = []
+  const unread: unknown[] = []
 
-  return { ...(value as SessionRecord), plans }
+  for (const raw of value.plans) {
+    const plan = asPlan(raw)
+
+    if (plan) {
+      plans.push(plan)
+    } else {
+      unread.push(raw)
+    }
+  }
+
+  const { compactions, unread: _unread, ...rest } = value as SessionRecord
+  const marks = Array.isArray(compactions) ? compactions.filter(isDate) : []
+
+  return {
+    ...rest,
+    plans,
+    ...(marks.length > 0 ? { compactions: marks } : {}),
+    ...(unread.length > 0 ? { unread } : {}),
+  }
 }
 
 export const loadRecord = async (kv: Kv, sessionId: string): Promise<SessionRecord | undefined> =>
@@ -87,8 +109,10 @@ export const loadRecord = async (kv: Kv, sessionId: string): Promise<SessionReco
 
 /** Resolves `false` when the store refused the write; never rejects. */
 export const saveRecord = async (kv: Kv, record: SessionRecord): Promise<boolean> => {
+  const { unread = [], ...rest } = record
+
   try {
-    await kv.set(RECORD + record.sessionId, record)
+    await kv.set(RECORD + record.sessionId, { ...rest, plans: [...unread, ...record.plans] })
 
     return true
   } catch {
@@ -128,31 +152,38 @@ export const markDropped = async (kv: Kv, sessionId: string, planId: string): Pr
   await kv.set(DROP + sessionId + ':' + planId, true)
 }
 
-/** Applies the marks left for this session's plans and removes them. */
+/**
+ * Applies the marks left for this session's plans. The marks stay: the caller
+ * clears them once the record they changed is saved. The record comes back
+ * as it was when no mark changed a plan.
+ */
 export const applyDrops = async (
   kv: Kv,
   record: SessionRecord,
   now: string,
-): Promise<SessionRecord> => {
+): Promise<{ record: SessionRecord; marks: string[] }> => {
   const prefix = DROP + record.sessionId + ':'
   const marks = (await kv.keys()).filter(key => key.startsWith(prefix))
+  const ids = marks.map(key => key.slice(prefix.length))
+  const hits = record.plans.some(plan => plan.status === 'active' && ids.includes(plan.id))
 
-  if (marks.length === 0) {
-    return record
+  if (!hits) {
+    return { record, marks }
   }
 
-  const ids = marks.map(key => key.slice(prefix.length))
   const plans = record.plans.map(plan =>
     plan.status === 'active' && ids.includes(plan.id)
       ? closePlan(plan, 'abandoned', now).plan
       : plan,
   )
 
+  return { record: { ...record, plans }, marks }
+}
+
+export const clearMarks = async (kv: Kv, marks: string[]): Promise<void> => {
   for (const key of marks) {
     await kv.delete(key)
   }
-
-  return { ...record, plans }
 }
 
 const lastTouched = (record: SessionRecord): number | undefined => {

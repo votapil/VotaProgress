@@ -99,6 +99,40 @@ test('отметка drop на план живой сессии применяе
   expect(w.store.has('drop:a:p1')).toBe(false)
 })
 
+test('отметка не снимается, пока запись с брошенным планом не сохранилась', async ($, on) => {
+  const w = world(on)
+  await $.session.start(boot)
+  await call($, START)
+  w.store.set('drop:a:p1', true)
+  w.failSet = true
+  await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
+  expect(w.store.has('drop:a:p1')).toBe(true)
+  w.failSet = false
+  await raise($).prompt.submit({ text: 'дальше' })
+  expect((w.store.get('s:a') as SessionRecord).plans[0]!.status).toBe('abandoned')
+  expect(w.store.has('drop:a:p1')).toBe(false)
+})
+
+test('битый план в своей записи: новый план не повторяет номер, битый остаётся в хранилище', async ($, on) => {
+  const bad = { id: 'p1', goal: 'битый', status: 'active' }
+  const done = { id: 'p2', goal: 'Старый', steps: [{ id: '1', text: 'а', weight: 1, status: 'done' }], status: 'done', createdAt: 'x', updatedAt: '2026-11-09T10:00:00.000Z' }
+  const w = world(on, { 's:a': { v: 1, sessionId: 'a', project: '/home/u/Demo', plans: [bad, done] } })
+  await $.session.start(boot)
+  await call($, START)
+  await call($, { tool: TOOL_FULL, action: 'update', done: ['1'] })
+  const plans = (w.store.get('s:a') as SessionRecord).plans
+  expect(plans.map(p => p.id)).toEqual(['p1', 'p2', 'p3'])
+  expect(plans[0]).toEqual(bad as never)
+  expect(plans[2]!.steps[0]!.status).toBe('done')
+})
+
+test('хранилище не читается: session.start доходит до строки под вводом', async ($, on) => {
+  const w = world(on)
+  w.failGet = true
+  await $.session.start(boot)
+  expect(w.statuses.length).toBeGreaterThan(0)
+})
+
 test('отказ хранилища: инструмент отвечает успехом', async ($, on) => {
   const w = world(on)
   w.failSet = true

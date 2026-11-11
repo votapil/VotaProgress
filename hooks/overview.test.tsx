@@ -219,6 +219,20 @@ test('план без изменений больше 30 дней рисуетс
   await ui.unmount()
 })
 
+test('при каждом открытии обзора текущая папка раскрыта, остальные свёрнуты', async ($, on) => {
+  seeded(on)
+  const ui = await overview($)
+  await ui.press({ key: 'f:/home/u/Demo' })
+  await ui.press({ key: 'f:/home/u/Shop' })
+  expect(await text(ui, 'f:/home/u/Demo')).toBe('▸ Demo (текущий)')
+  await ui.press({ key: 'chat' })
+  await ui.press({ key: 'all' })
+  expect(await text(ui, 'f:/home/u/Demo')).toBe('▾ Demo (текущий)')
+  expect(await text(ui, 'f:/home/u/Shop')).toBe('▸ Shop')
+  expect((await ui.find({ key: 'p:a:p1' }))?.props.autoFocus).toBe(true)
+  await ui.unmount()
+})
+
 test('фокус при открытии на первом незаконченном плане текущей папки', async ($, on) => {
   seeded(on)
   const ui = await overview($)

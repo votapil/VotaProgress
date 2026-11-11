@@ -76,8 +76,8 @@ test('statusLine: без активного шага хвоста нет', () =>
 })
 
 test('projectName берёт последнюю часть пути', () => {
-  expect(projectName('/home/votapil/Demo')).toBe('Demo')
-  expect(projectName('/home/votapil/Demo/')).toBe('Demo')
+  expect(projectName('/home/u/Demo')).toBe('Demo')
+  expect(projectName('/home/u/Demo/')).toBe('Demo')
   expect(projectName('/')).toBe('/')
 })
 

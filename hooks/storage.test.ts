@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { SessionRecord } from './plan'
 import {
   applyDrops,
+  clearMarks,
   emptyRecord,
   getPaneClosed,
   loadAll,
@@ -87,27 +88,32 @@ test('save возвращает false, когда set отказал, и не б
   expect(await saveRecord(kv, record('a', T0))).toBe(false)
 })
 
-test('applyDrops закрывает отмеченный активный план и удаляет отметку', async () => {
+test('applyDrops закрывает отмеченный активный план и называет отметки, не удаляя их', async () => {
   const kv = memory()
   await markDropped(kv, 'a', 'p1')
   expect(await kv.keys()).toEqual(['drop:a:p1'])
-  const rec = await applyDrops(kv, record('a', T0, 'active'), T1)
-  expect(rec.plans[0]).toMatchObject({ status: 'abandoned', closedAt: T1 })
+  const out = await applyDrops(kv, record('a', T0, 'active'), T1)
+  expect(out.record.plans[0]).toMatchObject({ status: 'abandoned', closedAt: T1 })
+  expect(out.marks).toEqual(['drop:a:p1'])
+  expect(await kv.keys()).toEqual(['drop:a:p1'])
+  await clearMarks(kv, out.marks)
   expect(await kv.keys()).toEqual([])
 })
 
-test('applyDrops: отметка на закрытый план удаляется, план не меняется', async () => {
+test('applyDrops: отметка на закрытый план - запись та же, отметка названа', async () => {
   const kv = memory()
   await markDropped(kv, 'a', 'p1')
   const before = record('a', T0, 'done')
-  expect(await applyDrops(kv, before, T1)).toEqual(before)
-  expect(await kv.keys()).toEqual([])
+  const out = await applyDrops(kv, before, T1)
+  expect(out.record).toBe(before)
+  expect(out.marks).toEqual(['drop:a:p1'])
 })
 
 test('applyDrops не трогает отметки чужих сессий', async () => {
   const kv = memory()
   await markDropped(kv, 'b', 'p1')
-  await applyDrops(kv, record('a', T0, 'active'), T1)
+  const before = record('a', T0, 'active')
+  expect(await applyDrops(kv, before, T1)).toEqual({ record: before, marks: [] })
   expect(await kv.keys()).toEqual(['drop:b:p1'])
 })
 
@@ -169,6 +175,7 @@ const broken: unknown[] = [
   { id: 'p9', goal: 'чужой статус', steps: [], status: 'paused', createdAt: T0, updatedAt: T0 },
   { id: 'p9', goal: 'шаг с весом 7', steps: [{ id: '1', text: 'а', weight: 7, status: 'active' }], status: 'active', createdAt: T0, updatedAt: T0 },
   { id: 'p9', goal: 'без даты', steps: [], status: 'done', createdAt: T0 },
+  { id: 'p9', goal: 'дата не дата', steps: [], status: 'done', createdAt: T0, updatedAt: 'вчера' },
 ]
 
 test('load: битый план пропускается, остальные остаются', async () => {
@@ -177,8 +184,28 @@ test('load: битый план пропускается, остальные о�
 
   for (const bad of broken) {
     kv.map.set('s:a', { ...good, plans: [bad, ...good.plans] })
-    expect((await loadRecord(kv, 'a'))?.plans).toEqual(good.plans)
+    const loaded = await loadRecord(kv, 'a')
+    expect(loaded?.plans).toEqual(good.plans)
+    expect(loaded?.unread).toEqual([bad])
   }
+})
+
+test('нечитаемый план сохраняется обратно как был', async () => {
+  const kv = memory()
+  const good = record('a', T0, 'done')
+  const bad = { id: 'p9', goal: 'из будущей версии', steps: [{ id: '1', text: 'а', weight: 4, status: 'active' }], status: 'active', createdAt: T0, updatedAt: T0 }
+  kv.map.set('s:a', { ...good, plans: [bad, ...good.plans] })
+  await saveRecord(kv, (await loadRecord(kv, 'a'))!)
+  expect((kv.map.get('s:a') as SessionRecord).plans).toEqual([bad, ...good.plans])
+  expect('unread' in (kv.map.get('s:a') as object)).toBe(false)
+})
+
+test('load: битые compactions отбрасываются, строки-даты остаются', async () => {
+  const kv = memory()
+  kv.map.set('s:a', { ...record('a', T0), compactions: 'x' })
+  expect('compactions' in (await loadRecord(kv, 'a'))!).toBe(false)
+  kv.map.set('s:a', { ...record('a', T0), compactions: [T0, 5, 'вчера', T1] })
+  expect((await loadRecord(kv, 'a'))?.compactions).toEqual([T0, T1])
 })
 
 test('load: запись без project пропускается', async () => {

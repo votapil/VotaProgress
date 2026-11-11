@@ -42,6 +42,13 @@ test('start: первый шаг активен, id p1', () => {
   })
 })
 
+test('start: номер нового плана - за самым большим, нечитаемые планы тоже считаются', () => {
+  const kept = { ...EMPTY, plans: [{ ...plan([step('1', 1, 'done')]), id: 'p2', status: 'done' as const }] }
+  expect(startPlan(kept, { goal: 'x', steps: [{ text: 'а' }] }, T1).record.plans.at(-1)!.id).toBe('p3')
+  const unread = { ...kept, unread: [null, { id: 'p7' }, { id: 'чужой' }] }
+  expect(startPlan(unread, { goal: 'x', steps: [{ text: 'а' }] }, T1).record.plans.at(-1)!.id).toBe('p8')
+})
+
 test('start не мутирует входную запись', () => {
   startPlan(EMPTY, { goal: 'Мод', steps: [{ text: 'а' }] }, T0)
   expect(EMPTY.plans).toHaveLength(0)

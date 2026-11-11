@@ -28,6 +28,8 @@ export type SessionRecord = {
   plans: Plan[]
   /** When the context was compacted, oldest first, the last 20 kept. */
   compactions?: string[]
+  /** Plans this version could not read, written back as they came. Never stored under this name. */
+  unread?: unknown[]
   endedAt?: string
   endReason?: string
 }

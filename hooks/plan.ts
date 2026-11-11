@@ -159,8 +159,15 @@ export const startPlan = (
 
     return closePlan(plan, status, now).plan
   })
+  // Numbered past the highest id the record holds, unreadable plans included:
+  // a skipped plan must not hand its number to a new one.
+  const ids = [...record.plans, ...(record.unread ?? [])].map(one =>
+    typeof one === 'object' && one !== null && 'id' in one && typeof one.id === 'string'
+      ? Number(/^p(\d+)$/.exec(one.id)?.[1] ?? 0)
+      : 0,
+  )
   const created: Plan = {
-    id: 'p' + (record.plans.length + 1),
+    id: 'p' + (Math.max(record.plans.length, ...ids) + 1),
     goal,
     ...(finish === '' ? {} : { finish }),
     steps,
