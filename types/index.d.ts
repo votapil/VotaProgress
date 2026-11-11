@@ -42,11 +42,25 @@ export type Flags = {
   replanPending: boolean
 }
 
+/** What the pane shows and how the person left the overview. */
+export type PaneState = {
+  view: 'chat' | 'all'
+  /** Folders opened (true) or closed (false) by hand, by project path. */
+  folders: Record<string, boolean>
+  /** The one plan shown in full, `sessionId:planId`. */
+  openPlan: string | null
+  /** Plans a folder shows past its first page, by project path. */
+  more: Record<string, number>
+  /** Bumped each time the overview rereads the store: the pane redraws. */
+  rev: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     votaprogress: {
       session: Shaped<SessionState>
       flags: Flags
+      pane: Shaped<PaneState>
     }
   }
 }

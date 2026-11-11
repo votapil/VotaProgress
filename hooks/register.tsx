@@ -7,15 +7,21 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { renderOverview } from './overview'
+import type { OverviewActions } from './overview'
 import { PANE, PANE_TITLE, projectOf, renderChat } from './pane'
 import { activePlan, autoCloseOutcome, closePlan, projectName, statusLine } from './plan'
 import type { SessionRecord } from './plan'
+import { PAGE, folders, withOwn } from './query'
+import type { Row } from './query'
 import { NUDGE, RULE, replanText } from './rule'
 import {
   applyDrops,
   emptyRecord,
   getPaneClosed,
+  loadAll,
   loadRecord,
+  markDropped,
   prune,
   saveRecord,
   setPaneClosed,
@@ -33,9 +39,33 @@ const flags = atom({ plugin: 'votaprogress', key: 'flags' } as const, {
   replanPending: false,
 })
 
+const pane = atom(
+  { plugin: 'votaprogress', key: 'pane' } as const,
+  { view: 'chat', folders: {}, openPlan: null, more: {}, rev: 0 },
+  { shape: 'pane-2' },
+)
+
 // A third of a 144-column terminal, the narrowest one a pane opens in unasked.
 // The engine caps it at 45% and a width the person set by hand wins.
 const PANE_COLUMNS = 48
+const MIN_COLUMNS = 24
+
+/** A third of the terminal the command ran in, between 24 and 48 columns. */
+const thirdOf = (columns: number | undefined): number =>
+  columns === undefined
+    ? PANE_COLUMNS
+    : Math.max(MIN_COLUMNS, Math.min(PANE_COLUMNS, Math.floor(columns / 3)))
+
+const NOT_COPIED: Record<'no-surface' | 'no-clipboard' | 'refused', string> = {
+  'no-surface': 'некуда копировать',
+  'no-clipboard': 'нет буфера обмена',
+  refused: 'отказано',
+}
+
+// The overview's read of every session's record. It lives in the module, not
+// in `$.state`: a reload loses it and `session.start` reads it again; the
+// state holds only a revision so the pane redraws.
+let snapshot: SessionRecord[] | null = null
 
 type $ = EngineInterface
 
@@ -118,12 +148,86 @@ export const refreshStatus = async ($: $): Promise<void> => {
   $.ui.status(isPlaced || !record ? undefined : statusLine(projectName(record.project), plan))
 }
 
-const openPane = async ($: $): Promise<boolean> => {
-  const opened = await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS })
+const openPane = async ($: $, columns = PANE_COLUMNS, focus = false): Promise<boolean> => {
+  const opened = await $.ui.open({
+    id: PANE,
+    title: PANE_TITLE,
+    columns,
+    ...(focus ? { focus: true as const } : {}),
+  })
   await refreshStatus($)
 
   return opened.isPlaced
 }
+
+/** Rereads every record for the overview; a store that cannot be read keeps the last read. */
+const reload = async ($: $): Promise<void> => {
+  snapshot = await loadAll(kv($)).catch(() => snapshot ?? [])
+  await update($, pane, held => ({ ...held, rev: held.rev + 1 }))
+}
+
+const showAll = async ($: $): Promise<void> => {
+  await update($, pane, held => ({ ...held, view: 'all' as const }))
+  await reload($)
+}
+
+/** A press runs its work in the background; a failure costs the press, not the pane. */
+const quietly = (work: Promise<unknown>): void => {
+  work.catch(() => undefined)
+}
+
+const overviewActions = ($: $): OverviewActions => ({
+  chat: () => quietly(update($, pane, held => ({ ...held, view: 'chat' as const }))),
+  refresh: () => quietly(reload($)),
+  folder: project =>
+    quietly(
+      (async () => {
+        const current = (await read($, session)).record?.project ?? (await $.session.root())
+        await update($, pane, held => {
+          const isOpen = held.folders[project] ?? project === current
+
+          return { ...held, folders: { ...held.folders, [project]: !isOpen } }
+        })
+      })(),
+    ),
+  plan: key =>
+    quietly(update($, pane, held => ({ ...held, openPlan: held.openPlan === key ? null : key }))),
+  more: project =>
+    quietly(
+      update($, pane, held => ({
+        ...held,
+        more: { ...held.more, [project]: (held.more[project] ?? 0) + PAGE },
+      })),
+    ),
+  copy: (text, surface) =>
+    quietly(
+      (async () => {
+        const out = await $.ui.copy({ text, surface })
+        $.ui.toast(
+          out.isCopied
+            ? 'Команда скопирована'
+            : 'Не скопировано: ' + NOT_COPIED[out.reason] + '. Выдели команду вручную',
+        )
+      })(),
+    ),
+  drop: (row: Row) =>
+    quietly(
+      (async () => {
+        // Only another session's unfinished plan: this chat's plan is closed by the model.
+        if (row.sessionId === (await read($, session)).owner || row.plan.status !== 'active') {
+          return
+        }
+
+        const isMarked = await markDropped(kv($), row.sessionId, row.plan.id).then(
+          () => true,
+          () => false,
+        )
+        $.ui.toast(isMarked ? 'План выброшен' : 'Не выброшено: хранилище не приняло отметку')
+        await update($, pane, held => ({ ...held, openPlan: null }))
+        await reload($)
+      })(),
+    ),
+})
 
 const OWN = 'mcp__votaprogress__progress'
 const COMPACTIONS = 20
@@ -152,10 +256,19 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     await $.tool.register(toolSpec)
-    await $.command.register({ name: 'progress', description: 'Показать план задачи в панели' })
+    await $.command.register({
+      name: 'progress',
+      description: 'Показать план задачи в панели; all - обзор всех проектов',
+      argumentHint: '[all]',
+    })
     await ensureSession($)
     await prune(kv($), await nowIso($))
     await refreshStatus($)
+
+    // After a reload of the module the overview has no read of the store yet.
+    if ((await read($, pane)).view === 'all') {
+      await reload($)
+    }
 
     return next(e)
   })
@@ -246,14 +359,17 @@ export const register: Register = on => {
     // precompute installs nothing and a vetoed one changed nothing.
     if (e.agentId === undefined && e.trigger !== 'precompute' && out.skip === undefined) {
       await update($, flags, held => ({ ...held, replanPending: true }))
-      const record = await ensureSession($)
 
       // Marked only where there is a plan to stand above: a session without
-      // plans keeps no record.
-      if (record.plans.length > 0) {
-        const compactions = [...(record.compactions ?? []), await nowIso($)].slice(-COMPACTIONS)
-        await commit($, { ...record, compactions })
-      }
+      // plans keeps no record. A mark that fails costs the mark alone.
+      await (async () => {
+        const record = await ensureSession($)
+
+        if (record.plans.length > 0) {
+          const compactions = [...(record.compactions ?? []), await nowIso($)].slice(-COMPACTIONS)
+          await commit($, { ...record, compactions })
+        }
+      })().catch(() => undefined)
     }
 
     return out
@@ -289,15 +405,22 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'progress' }, async $ => {
+  on('command.run', { command: 'progress' }, async ($, e) => {
     await setPaneClosed(kv($), false)
     await ensureSession($)
+    const isAll = e.args.trim() === 'all'
 
-    return {
-      text: (await openPane($))
-        ? 'Панель прогресса открыта.'
-        : 'Панель не поместилась: план виден в строке под вводом.',
+    if (isAll) {
+      await showAll($)
     }
+
+    const isPlaced = await openPane($, thirdOf(e.presentation?.columns), isAll)
+
+    if (!isPlaced) {
+      return { text: 'Панель не поместилась: план виден в строке под вводом.' }
+    }
+
+    return { text: isAll ? 'Обзор всех проектов открыт.' : 'Панель прогресса открыта.' }
   })
 
   on('ui.close', { id: 'votaprogress' }, async ($, e, next) => {
@@ -314,13 +437,35 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: 'votaprogress' }, async ($, e) => {
     const { record } = await read($, session)
     const { storeFailed } = await read($, flags)
+    const state = await read($, pane)
+    const root = await $.session.root()
+
+    if (state.view === 'all') {
+      const now = await nowIso($)
+
+      return renderOverview($.ui.resolve(e), {
+        folders:
+          snapshot === null
+            ? null
+            : folders(withOwn(snapshot, record), {
+                current: record?.project ?? root,
+                ownSession: record?.sessionId ?? '',
+                now,
+              }),
+        state,
+        columns: e.props.bodyColumns,
+        now,
+        on: overviewActions($),
+      })
+    }
 
     return renderChat($.ui.resolve(e), {
       record,
-      project: projectOf(record, await $.session.root()),
+      project: projectOf(record, root),
       rows: e.props.scroll.bodyRows,
       columns: e.props.bodyColumns,
       storeFailed,
+      onAll: () => quietly(showAll($)),
     })
   })
 

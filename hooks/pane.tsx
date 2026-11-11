@@ -21,10 +21,12 @@ export type ChatView = {
   rows: number
   columns: number
   storeFailed: boolean
+  /** Switches the pane to the overview. */
+  onAll: () => void
 }
 
 export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view: ChatView) => {
-  const { Box, Text } = table
+  const { Box, Button, Text } = table
   const plan = view.record ? activePlan(view.record) : undefined
   const earlier = view.record ? history(view.record, HISTORY) : []
   // Steps done of all, never a percent: a plan grows as the work goes, and a
@@ -36,7 +38,8 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
     (plan?.finish === undefined ? 0 : 1) +
     1 +
     (earlier.length > 0 ? earlier.length + 2 : 0) +
-    (view.storeFailed ? 2 : 0)
+    (view.storeFailed ? 2 : 0) +
+    2
   const shown = plan ? windowSteps(plan.steps, Math.max(1, view.rows - fixed)) : undefined
 
   // The left text is cut here, to the cells the tag on the right leaves: left
@@ -98,6 +101,9 @@ export const renderChat = <S extends RenderSurface>(table: ElementTable<S>, view
           <Text color="warning">хранилище заполнено, планы не сохраняются</Text>
         </Box>
       )}
+      <Box marginTop={1}>
+        <Button key="all" plain hotkey="p" label="все проекты" onPress={() => view.onAll()} />
+      </Box>
     </Box>
   )
 }

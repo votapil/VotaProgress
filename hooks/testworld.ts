@@ -2,7 +2,7 @@
 // Not loaded by the mod.
 import { mock } from 'claude-code/testing'
 import type { MockClock } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, UiCopyResult } from 'claude-code'
 
 import { TOOL_FULL } from './tool'
 
@@ -21,11 +21,17 @@ export type World = {
   store: Map<string, unknown>
   /** Whether a pane the mod opens gets drawn. */
   isPlaced: boolean
-  opened: { id: string; title?: string; columns?: number }[]
+  opened: { id: string; title?: string; columns?: number; focus?: true }[]
   /** Every `$.ui.status` the mod set, in order. */
   statuses: (string | undefined)[]
   /** The engine's clock: `advance` moves it on. */
   clock: MockClock
+  /** What `$.ui.copy` answers. */
+  copy: UiCopyResult
+  /** Every text `$.ui.copy` was given, in order. */
+  copied: string[]
+  /** Every `$.ui.toast` text, in order. */
+  toasts: string[]
 }
 
 export const world = (on: On, entries: Record<string, unknown> = {}): World => {
@@ -43,6 +49,9 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     opened: [],
     statuses: [],
     clock: undefined as unknown as MockClock,
+    copy: { isCopied: true },
+    copied: [],
+    toasts: [],
   }
   on('store.get', (_, e) => (state.failGet ? { deny: 'store is down' } : { value: store.get(e.key) }))
   on('store.set', (_, e) => {
@@ -95,6 +104,16 @@ export const world = (on: On, entries: Record<string, unknown> = {}): World => {
     })),
   }))
   on('ui.close', () => ({ value: undefined }))
+  on('ui.copy', (_, e) => {
+    state.copied.push(e.text)
+
+    return { value: state.copy }
+  })
+  on('ui.toast', (_, e) => {
+    state.toasts.push(e.text)
+
+    return { value: undefined }
+  })
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'x', scope: 'shared' as const }] }))
   on('prompt.submit', (_, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))

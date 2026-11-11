@@ -68,7 +68,9 @@ test('в низкой панели сделанные сжаты в счётчи
   const steps = Array.from({ length: 10 }, (_, i) => ({ text: 'шаг ' + (i + 1) }))
   await call($, { ...START, steps })
   await call($, { tool: TOOL_FULL, action: 'update', done: ['1', '2', '3'] })
-  const ui = await $.ui.mount({ ...pane(9), surface: 'terminal' })
+  // Five rows for the steps: the project, the goal, the finish, two gaps and
+  // the button to the overview take the other six.
+  const ui = await $.ui.mount({ ...pane(11), surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /сделано/ }))?.text).toBe('✓ 3 сделано')
   expect((await ui.find({ type: 'Text', text: /ещё/ }))?.text).toBe('… ещё 4')
   expect((await ui.findAll({ type: 'Text', text: /^[◐○]/ })).map(t => t.text)).toEqual(['◐ шаг 4', '○ шаг 5', '○ шаг 6'])
